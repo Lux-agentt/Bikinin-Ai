@@ -7,6 +7,7 @@ import { loadConfig, type Config } from "./config.js";
 import { loadSystemPrompt } from "./prompt.js";
 import { createAppServer } from "./server/http.js";
 import { RunManager } from "./server/runs.js";
+import { formatSkillList, listSkills, REPO_SKILLS_DIR } from "./skills/loader.js";
 
 function flag(name: string, fallback: string): string {
   const i = process.argv.indexOf(name);
@@ -45,7 +46,11 @@ async function main(): Promise<void> {
   await assertWorkspaceIsolated(workspace);
   const manager = new RunManager(cfg, {
     workspace,
-    systemPrompt: await loadSystemPrompt(),
+    // Fase 2: the system prompt lists available skills (name + description
+    // only); the agent reads the full text with read_skill when relevant.
+    systemPrompt: await loadSystemPrompt(
+      formatSkillList(await listSkills(REPO_SKILLS_DIR)),
+    ),
   });
   // Restore sessions + metadata saved by earlier runs (workspace/.bikinin/).
   const restored = await manager.init();

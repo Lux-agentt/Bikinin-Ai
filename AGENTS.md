@@ -137,11 +137,11 @@ Catatan keamanan: penyedia adalah perantara pihak ketiga. Jangan kirim rahasia l
 
 ### Fase 1: Keamanan dan stabilitas
 
-- [ ] Test path traversal (`../`), symlink keluar workspace, dan perintah berbahaya.
-- [ ] Log semua kejadian ke `workspace/.bikinin/sessions/<session_id>.jsonl` (format NDJSON dari Lampiran A).
-- [ ] Lanjutkan sesi (`--continue`) dengan membaca log.
-- [ ] Pemangkasan konteks: ringkas riwayat lama saat mendekati batas.
-- [ ] `--yolo` hanya bila diminta eksplisit oleh pemilik.
+- [x] Test path traversal (`../`), symlink keluar workspace, dan perintah berbahaya.
+- [x] Log semua kejadian ke `workspace/.bikinin/sessions/<session_id>.jsonl` (format NDJSON dari Lampiran A).
+- [x] Lanjutkan sesi (`--continue`) dengan membaca log.
+- [x] Pemangkasan konteks: ringkas riwayat lama saat mendekati batas.
+- [x] `--yolo` hanya bila diminta eksplisit oleh pemilik.
 
 ### Fase 2: Sistem Skill
 

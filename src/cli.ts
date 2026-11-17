@@ -12,6 +12,7 @@ import { loadConfig } from "./config.js";
 import { createEmitter, toNDJSON, type AgentEvent } from "./events.js";
 import { createFallbackLlm } from "./llm/fallback.js";
 import { loadSystemPrompt } from "./prompt.js";
+import { formatSkillList, listSkills, REPO_SKILLS_DIR } from "./skills/loader.js";
 import { parseCliArgs } from "./cli-args.js";
 import { makeApprover } from "./approve.js";
 import { SessionHistory, MAX_SESSIONS } from "./agent/history.js";
@@ -151,7 +152,9 @@ async function main(): Promise<number> {
     const result = await runAgent({
       llm: createFallbackLlm(cfg.providers),
       model: primary.model,
-      systemPrompt: await loadSystemPrompt(),
+      systemPrompt: await loadSystemPrompt(
+        formatSkillList(await listSkills(REPO_SKILLS_DIR)),
+      ),
       message: args.message,
       sessionId,
       workspace,

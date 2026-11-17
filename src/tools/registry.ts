@@ -1,8 +1,10 @@
-// The only list of tools the agent can call. Phase 0 tools; read_skill/preview/render_video come later.
+// The only list of tools the agent can call. read_skill (Fase 2) is here;
+// preview/render_video come later.
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
 import { editFileTool } from "./edit-file.js";
 import { listDirTool } from "./list-dir.js";
 import { readFileTool } from "./read-file.js";
+import { readSkillTool } from "./read-skill.js";
 import { runCommandTool } from "./run-command.js";
 import type { RegisteredTool } from "./types.js";
 import { writeFileTool } from "./write-file.js";
@@ -13,6 +15,7 @@ export const TOOLS: RegisteredTool[] = [
   writeFileTool,
   editFileTool,
   runCommandTool,
+  readSkillTool,
 ];
 
 export function getTool(name: string): RegisteredTool | undefined {

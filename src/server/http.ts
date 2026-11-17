@@ -12,12 +12,11 @@ import { fileURLToPath } from "node:url";
 import { AgentError } from "../errors.js";
 import { ApprovalBody, StartRunBody, toSSE } from "../events.js";
 import { resolveInWorkspace } from "../safety/paths.js";
-import { listSkills } from "../skills/loader.js";
+import { listSkills, REPO_SKILLS_DIR } from "../skills/loader.js";
 import { BusyError, NotConfiguredError, type RunManager } from "./runs.js";
 import { buildZip } from "./zip.js";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../../public/", import.meta.url));
-const SKILLS_DIR = fileURLToPath(new URL("../../skills/", import.meta.url));
 const MAX_BODY = 64 * 1024;
 const MAX_PREVIEW_BYTES = 5 * 1024 * 1024;
 const MAX_ZIP_FILE_BYTES = 5 * 1024 * 1024;
@@ -237,7 +236,7 @@ async function route(
   }
 
   if (method === "GET" && path === "/api/skills") {
-    return sendJson(res, 200, await listSkills(SKILLS_DIR));
+    return sendJson(res, 200, await listSkills(REPO_SKILLS_DIR));
   }
 
   const sm = path.match(
