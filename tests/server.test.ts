@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  writeFile,
+} from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -99,11 +106,20 @@ function parseSse(text: string): AgentEvent[] {
     .map((l) => JSON.parse(l.slice(6)) as AgentEvent);
 }
 
-async function waitFor(cond: () => boolean, ms = 3000) {
+async function waitFor(cond: () => boolean | Promise<boolean>, ms = 3000) {
   const t0 = Date.now();
-  while (!cond()) {
+  while (!(await cond())) {
     if (Date.now() - t0 > ms) throw new Error("timeout menunggu kondisi");
     await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -285,6 +301,129 @@ describe("web server", () => {
     expect(third.session_id).not.toBe("s_deadbeef");
     await (await fetch(`${url}/api/runs/${third.run_id}/events`)).text();
     expect(seen[2]).not.toContain("namaku Rizqi");
+  });
+
+  it("restores sessions and long-term memory across a server restart", async () => {
+    const seen: string[][] = [];
+    const responses = [
+      withCalls(
+        call("t1", "write_file", {
+          path: "index.html",
+          content: "<h1>Kopi</h1>",
+        }),
+      ),
+      finalText("Selesai, halaman sudah jadi."),
+      finalText("ok kedua."),
+      finalText("Namamu Rizqi."),
+    ];
+    let i = 0;
+    const llm: LlmClient = {
+      async chat(p) {
+        seen.push(
+          p.messages.map((m) =>
+            typeof m.content === "string" ? m.content : "",
+          ),
+        );
+        return responses[i++];
+      },
+    };
+    const base = await mkdtemp(join(tmpdir(), "bikinin-restart-"));
+    await mkdir(join(base, "ws"));
+    const workspace = await realpath(join(base, "ws"));
+
+    const bootManager = async (manager: RunManager) => {
+      const server = createAppServer(manager, workspace);
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+      open.push(
+        () =>
+          new Promise<void>((r) => {
+            server.closeAllConnections();
+            server.close(() => r());
+          }),
+      );
+      return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    };
+
+    // Server 1: one run that teaches the agent a fact and builds a file.
+    const manager1 = new RunManager(cfg, {
+      workspace,
+      systemPrompt: "sys",
+      llm,
+    });
+    const url1 = await bootManager(manager1);
+    const first = (await (
+      await post(`${url1}/api/runs`, {
+        message: "namaku Rizqi, panggil aku Qi. Buat halaman kopi.",
+      })
+    ).json()) as { run_id: string; session_id: string };
+    await (await fetch(`${url1}/api/runs/${first.run_id}/events`)).text();
+    // Persistence happens after run_finished, so wait for the files on disk.
+    await waitFor(() =>
+      exists(
+        join(workspace, ".bikinin", "sessions", `${first.session_id}.json`),
+      ),
+    );
+    await waitFor(() => exists(join(workspace, ".bikinin", "memory.md")));
+
+    const memoryText = await readFile(
+      join(workspace, ".bikinin", "memory.md"),
+      "utf8",
+    );
+    expect(memoryText).toContain("(fakta) namaku Rizqi, panggil aku Qi.");
+    expect(memoryText).toContain("(hasil) Membuat/mengubah index.html");
+
+    // Server 2 (restart): same workspace, fresh manager + init().
+    const manager2 = new RunManager(cfg, {
+      workspace,
+      systemPrompt: "sys",
+      llm,
+    });
+    expect(await manager2.init()).toBe(1);
+    const url2 = await bootManager(manager2);
+    const sessions = (await (
+      await fetch(`${url2}/api/sessions`)
+    ).json()) as Array<{
+      session_id: string;
+      title: string;
+      prompts: number;
+      runs: number;
+      last_status: string | null;
+    }>;
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      session_id: first.session_id,
+      prompts: 1,
+      runs: 1,
+      last_status: "completed",
+    });
+
+    // A second session, so the "recent sessions" list is non-empty.
+    const second = (await (
+      await post(`${url2}/api/runs`, {
+        message: "proyek kedua",
+      })
+    ).json()) as { run_id: string; session_id: string };
+    await (await fetch(`${url2}/api/runs/${second.run_id}/events`)).text();
+
+    const third = (await (
+      await post(`${url2}/api/runs`, {
+        message: "siapa namaku?",
+        session_id: first.session_id,
+      })
+    ).json()) as { run_id: string; session_id: string };
+    expect(third.session_id).toBe(first.session_id);
+    await (await fetch(`${url2}/api/runs/${third.run_id}/events`)).text();
+    // The restored session history is replayed…
+    // (seen[0] and seen[1] are both run 1: tool call, then final text.)
+    expect(seen[3]).toContain(
+      "namaku Rizqi, panggil aku Qi. Buat halaman kopi.",
+    );
+    // …and the long-term memory is injected into the system prompt,
+    // including the list of other recent sessions.
+    expect(seen[3][0]).toContain("Memori dari obrolan sebelumnya");
+    expect(seen[3][0]).toContain("namaku Rizqi, panggil aku Qi");
+    expect(seen[3][0]).toContain("Sesi terakhir:");
+    expect(seen[3][0]).toContain("proyek kedua");
   });
 
   it("validates request bodies", async () => {

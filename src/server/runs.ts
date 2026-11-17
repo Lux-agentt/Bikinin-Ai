@@ -6,6 +6,7 @@ import { join, relative, sep } from "node:path";
 import {
   runAgent,
   type AgentDeps,
+  type AgentResult,
   type ApprovalRequest,
   type EmitFn,
 } from "../agent/loop.js";
@@ -15,7 +16,17 @@ import { createEmitter, StartRunBody, type AgentEvent } from "../events.js";
 import type { LlmClient } from "../llm/client.js";
 import { createFallbackLlm } from "../llm/fallback.js";
 import type { ProviderConfig } from "../llm/providers.js";
+import {
+  appendMemoryFacts,
+  deleteSession,
+  loadSessions,
+  pruneSessions,
+  readMemoryEntries,
+  saveSession,
+  type PersistedSession,
+} from "./persistence.js";
 import { MAX_SESSIONS, SessionHistory } from "../agent/history.js";
+import { buildMemoryContext, extractFacts } from "../agent/memory.js";
 
 export interface RunRecord {
   runId: string;
@@ -27,12 +38,16 @@ export interface RunRecord {
   pending: Map<string, (allow: boolean) => void>;
 }
 
-/** Lightweight metadata for the history panel. The title is the first prompt. */
+/** Lightweight metadata for the history panel. The title is the first prompt.
+ *  runIds only covers runs of this process (events are not persisted); runCount
+ *  and lastStatus are the durable counters, restored from disk on startup. */
 interface SessionMeta {
   title: string;
   prompts: number;
   updatedAt: number;
   runIds: string[];
+  runCount: number;
+  lastStatus: string | null;
 }
 
 export interface SessionSummary {
@@ -73,6 +88,32 @@ export class RunManager {
     private readonly opts: RunManagerOptions,
   ) {}
 
+  /**
+   * Restores persisted sessions and their metadata from workspace/.bikinin/
+   * (see persistence.ts). Call once at startup, before serving. Safe to call
+   * on a fresh workspace (restores nothing) and safe to call twice.
+   * Returns how many sessions were restored.
+   */
+  async init(): Promise<number> {
+    let restored = 0;
+    for (const s of await loadSessions(this.opts.workspace)) {
+      if (this.sessions.has(s.session_id)) continue;
+      this.sessions.set(s.session_id, SessionHistory.fromJSON(s.history));
+      this.meta.set(s.session_id, {
+        title: s.title,
+        prompts: s.prompts,
+        updatedAt: s.updated_at,
+        runIds: [],
+        runCount: s.runs,
+        lastStatus: s.last_status,
+      });
+      restored++;
+    }
+    // Enforce the cap on disk too (a previous process may have left extras).
+    await pruneSessions(this.opts.workspace, MAX_SESSIONS).catch(() => {});
+    return restored;
+  }
+
   /** Public, non-secret settings for the UI. Never includes keys or URLs. */
   info() {
     const primary = this.cfg.providers[0];
@@ -92,30 +133,14 @@ export class RunManager {
   /** Sessions for the history panel, newest first. */
   listSessions(): SessionSummary[] {
     return [...this.meta.entries()]
-      .map(([id, m]) => {
-        const lastRun =
-          m.runIds.length > 0
-            ? this.runs.get(m.runIds[m.runIds.length - 1])
-            : undefined;
-        let lastStatus: string | null = null;
-        if (lastRun) {
-          for (let i = lastRun.events.length - 1; i >= 0; i--) {
-            const e = lastRun.events[i];
-            if (e.type === "run_finished") {
-              lastStatus = e.status;
-              break;
-            }
-          }
-        }
-        return {
-          session_id: id,
-          title: m.title,
-          prompts: m.prompts,
-          runs: m.runIds.length,
-          updated_at: m.updatedAt,
-          last_status: lastStatus,
-        };
-      })
+      .map(([id, m]) => ({
+        session_id: id,
+        title: m.title,
+        prompts: m.prompts,
+        runs: m.runCount,
+        updated_at: m.updatedAt,
+        last_status: m.lastStatus,
+      }))
       .sort((a, b) => b.updated_at - a.updated_at);
   }
 
@@ -181,6 +206,7 @@ export class RunManager {
         if (oldest === undefined) break;
         this.sessions.delete(oldest);
         this.meta.delete(oldest);
+        void deleteSession(this.opts.workspace, oldest).catch(() => {});
       }
     }
     // Model must be on the server allowlist; anything else falls back to primary.
@@ -193,12 +219,15 @@ export class RunManager {
       m.prompts += 1;
       m.updatedAt = Date.now();
       m.runIds.push(runId);
+      m.runCount += 1;
     } else {
       this.meta.set(sessionId, {
         title: body.message,
         prompts: 1,
         updatedAt: Date.now(),
         runIds: [runId],
+        runCount: 1,
+        lastStatus: null,
       });
     }
     const rec: RunRecord = {
@@ -248,12 +277,19 @@ export class RunManager {
     effort: "sedang" | "tinggi",
   ): Promise<void> {
     const history = this.sessions.get(rec.sessionId);
+    // Long-term memory + recent sessions, injected into the system prompt so
+    // the model sees what it learned in earlier sessions. A failed read
+    // means no memory, never a failed run.
+    const memoryBlock = await this.memoryContext(rec.sessionId).catch(() => "");
+    const systemPrompt = memoryBlock
+      ? `${this.opts.systemPrompt}\n\n${memoryBlock}`
+      : this.opts.systemPrompt;
     try {
       const result = await runAgent({
         llm: this.opts.llm ?? createFallbackLlm(this.cfg.providers),
         model: provider.model,
         effort,
-        systemPrompt: this.opts.systemPrompt,
+        systemPrompt,
         message,
         sessionId: rec.sessionId,
         workspace: this.opts.workspace,
@@ -268,8 +304,21 @@ export class RunManager {
         history: history?.messages(),
       });
       history?.add(result.transcript);
+      const m = this.meta.get(rec.sessionId);
+      if (m) m.lastStatus = result.status;
+      // Durability: a crash or restart after this point must not lose the
+      // session or what the run learned. Fire-and-forget on purpose: the
+      // in-memory state above is already consistent, and awaiting disk IO
+      // here would keep the run "busy" after run_finished was emitted.
+      // Persistence failures are swallowed — the run already succeeded.
+      // Trade-off, documented: the memory file may lag one run behind.
+      void this.persistSession(rec.sessionId).catch(() => {});
+      void this.updateMemory(result).catch(() => {});
     } catch (err) {
       // runAgent normally always emits run_finished; this is a last-resort guard.
+      const m = this.meta.get(rec.sessionId);
+      if (m) m.lastStatus = "error";
+      void this.persistSession(rec.sessionId).catch(() => {});
       if (!rec.finished) {
         emit("error", {
           code: "internal",
@@ -291,6 +340,52 @@ export class RunManager {
         });
       }
     }
+  }
+
+  /** The memory block for the system prompt: long-term facts + recent sessions. */
+  private async memoryContext(currentSessionId: string): Promise<string> {
+    const entries = await readMemoryEntries(this.opts.workspace);
+    const sessions = [...this.meta.entries()].map(([id, m]) => ({
+      id,
+      title: m.title,
+      updatedAt: m.updatedAt,
+    }));
+    return buildMemoryContext(entries, sessions, currentSessionId);
+  }
+
+  /** Writes one session's history + metadata to disk (atomic). */
+  private async persistSession(sessionId: string): Promise<void> {
+    const history = this.sessions.get(sessionId);
+    const m = this.meta.get(sessionId);
+    if (!history || !m) return;
+    const data: PersistedSession = {
+      version: 1,
+      session_id: sessionId,
+      title: m.title,
+      prompts: m.prompts,
+      runs: m.runCount,
+      last_status: m.lastStatus,
+      updated_at: m.updatedAt,
+      history: history.toJSON(),
+    };
+    await saveSession(this.opts.workspace, data);
+  }
+
+  /**
+   * Rule-based long-term memory update from a finished run. Cheap by design:
+   * no model call, only deterministic extraction from the transcript. Writes
+   * nothing when no durable fact was learned.
+   */
+  private async updateMemory(result: AgentResult): Promise<void> {
+    const facts = extractFacts(
+      result.transcript,
+      result.summary,
+      result.filesCreated,
+      result.filesChanged,
+      result.status,
+    );
+    if (facts.length === 0) return;
+    await appendMemoryFacts(this.opts.workspace, facts);
   }
 
   stop(runId: string): boolean {

@@ -94,17 +94,14 @@ export class SessionHistory {
           typeof m !== "object" ||
           m === null ||
           typeof (m as { role?: unknown }).role !== "string" ||
-          !["user", "assistant", "tool"].includes(
-            (m as { role: string }).role,
-          )
+          !["user", "assistant", "tool"].includes((m as { role: string }).role)
         )
           continue;
         msgs.push(m as Msg);
       }
       if (msgs.length > 0) h.runs.push(msgs);
     }
-    while (h.runs.length > 1 && h.chars() > HISTORY_CHAR_BUDGET)
-      h.runs.shift();
+    while (h.runs.length > 1 && h.chars() > HISTORY_CHAR_BUDGET) h.runs.shift();
     return h;
   }
 

@@ -47,6 +47,10 @@ async function main(): Promise<void> {
     workspace,
     systemPrompt: await loadSystemPrompt(),
   });
+  // Restore sessions + metadata saved by earlier runs (workspace/.bikinin/).
+  const restored = await manager.init();
+  if (restored > 0)
+    console.log(`Memori dimuat: ${restored} sesi lama dipulihkan.`);
 
   createAppServer(manager, workspace).listen(port, host, () => {
     console.log(`Bikinin AI: http://${host}:${port}`);
