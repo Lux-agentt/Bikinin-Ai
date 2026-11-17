@@ -88,3 +88,26 @@ npm run cli -- --continue [s_xxxxxxxx] "lanjutkan" [--json] [--yolo]
   dengan `ffprobe` (video stream + durasi).
 - Bukti smoke (`npx tsx scripts/smoke-remotion.ts`): intro 10 detik →
   MP4 h264 1280×720, durasi 10,00 dtk, ~60 KB, still PNG 23,8 KB dicek dulu.
+
+### Fase 5: cari, checkpoint, subagent, hemat token
+
+- `web_search` — cari fakta terkini di internet (DuckDuckGo Lite, gratis,
+  tanpa API key). Maks 5 hasil, ringkas, timeout 8 detik.
+- **Checkpoint** — tiap run dimulai dengan snapshot workspace (git bila repo
+  git, salinan file bila bukan). Daftar di `GET /api/checkpoints`, pulihkan
+  lewat `POST /api/checkpoints/:id/restore` (tombol di UI, butuh konfirmasi).
+  Restore tercatat sebagai event `checkpoint_restored`. `.env` dan file
+  mirip rahasia tidak pernah masuk snapshot.
+- `delegate` — subagent riset (baca file/skill/cari internet saja, maks
+  8 langkah, $0,05, maks 2 bersamaan). Hasilnya ringkasan ke agent utama,
+  dan biayanya masuk total run. Peringatan: subagent memakai kuota provider
+  yang sama — OpenRouter gratis cuma 50 request/hari per akun.
+- `update_plan` — rencana maks 5 langkah sebelum tool pertama; panel Todo di
+  UI mengikuti event `plan_updated`.
+- **Input suara** — tombol mikrofon di composer memakai Web Speech API
+  browser (gratis, tanpa key); disembunyikan bila browser tidak mendukung.
+- **Hemat token (ditegakkan di kode):** rencana dulu; panggilan yang sama
+  gagal 3x berturut-turut → run berhenti dan tanya pengguna; `read_file`
+  tidak dibaca ulang bila file tidak berubah; hasil tool lama dipotong saat
+  konteks run mendekati 100.000 karakter; riwayat antar-run tetap diringkas
+  ekstraktif (tanpa model baru).

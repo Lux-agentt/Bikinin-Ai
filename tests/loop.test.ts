@@ -89,8 +89,16 @@ function expectWellFormed(events: AgentEvent[]) {
 }
 
 describe("agent loop event contract", () => {
+  // Fase 5: plan-first — the loop nudges the model to call update_plan
+  // before any other tool, so scripted models below start with a plan.
+  const plan = (id: string) =>
+    call(id, "update_plan", {
+      items: [{ text: "Kerjakan tugas", status: "doing" }],
+    });
+
   it("writes a file, emits valid ordered events, and completes", async () => {
     const { workspace, events, result } = await run([
+      withCalls(plan("t0")),
       withCalls(
         call("t1", "write_file", {
           path: "index.html",
@@ -110,6 +118,7 @@ describe("agent loop event contract", () => {
 
   it("keeps the file content out of emitted arguments", async () => {
     const { events } = await run([
+      withCalls(plan("t0")),
       withCalls(
         call("t1", "write_file", { path: "a.txt", content: "RAHASIA_ISI" }),
       ),
@@ -122,16 +131,21 @@ describe("agent loop event contract", () => {
 
   it("places approval between tool start and finish, and denies by default", async () => {
     const { workspace, events, result } = await run([
+      withCalls(plan("t0")),
       withCalls(call("t1", "run_command", { command: "npm install" })),
       finalText("ok"),
     ]);
     expect(result.status).toBe("completed");
     const order = types(events);
     const req = order.indexOf("approval_requested");
-    expect(req).toBeGreaterThan(order.indexOf("tool_call_started"));
-    expect(req).toBeLessThan(order.indexOf("tool_call_finished"));
+    // The plan call finishes first; the approval must sit between the
+    // run_command's own start and finish (the last of each).
+    expect(req).toBeGreaterThan(order.lastIndexOf("tool_call_started"));
+    expect(req).toBeLessThan(order.lastIndexOf("tool_call_finished"));
     expect(ofType(events, "approval_resolved")[0].decision).toBe("deny");
-    expect(ofType(events, "tool_call_finished")[0].ok).toBe(false);
+    // [0] is the plan call's finish (ok); the denied run_command is the last finish.
+    const finished = ofType(events, "tool_call_finished");
+    expect(finished[finished.length - 1].ok).toBe(false);
     expectWellFormed(events);
     await expect(
       readFile(join(workspace, "node_modules"), "utf8"),
@@ -140,6 +154,7 @@ describe("agent loop event contract", () => {
 
   it("blocks destructive commands without asking", async () => {
     const { events } = await run([
+      withCalls(plan("t0")),
       withCalls(call("t1", "run_command", { command: "sudo ls" })),
       finalText("ok"),
     ]);
@@ -150,11 +165,13 @@ describe("agent loop event contract", () => {
 
   it("returns invalid tool arguments to the model instead of crashing", async () => {
     const { events, result } = await run([
+      withCalls(plan("t0")),
       withCalls(call("t1", "write_file", { path: "a.txt" })),
       finalText("maaf, saya perbaiki"),
     ]);
     expect(result.status).toBe("completed");
-    expect(ofType(events, "tool_call_finished")[0].ok).toBe(false);
+    // The plan call finishes first; the invalid-args finish is the last one.
+    expect(ofType(events, "tool_call_finished").at(-1)?.ok).toBe(false);
     expectWellFormed(events);
   });
 
@@ -187,6 +204,7 @@ describe("agent loop event contract", () => {
     // before approve() is ever consulted.
     const { events, result } = await run(
       [
+        withCalls(plan("t0")),
         withCalls(call("t1", "run_command", { command: "rm -rf /" })),
         finalText("selesai"),
       ],
@@ -194,9 +212,10 @@ describe("agent loop event contract", () => {
     );
     expect(result.status).toBe("completed");
     expect(ofType(events, "error")[0].code).toBe("command_blocked");
-    expect(ofType(events, "tool_call_finished")[0].summary).toContain(
-      "diblokir",
-    );
+    // The plan call finishes first; the blocked call's finish is the last one.
+    expect(
+      ofType(events, "tool_call_finished").at(-1)?.summary,
+    ).toContain("diblokir");
     expectWellFormed(events);
   });
 });

@@ -15,6 +15,7 @@ import { AgentEvent } from "../src/events.js";
 import type { ChatResult, LlmClient, ToolCallReq } from "../src/llm/client.js";
 import { createAppServer } from "../src/server/http.js";
 import { RunManager } from "../src/server/runs.js";
+import { readSessionEvents } from "../src/server/event-log.js";
 
 const usage = { input_tokens: 100, output_tokens: 20, cached_tokens: 0 };
 const call = (id: string, name: string, args: unknown): ToolCallReq => ({
@@ -27,6 +28,12 @@ const withCalls = (...toolCalls: ToolCallReq[]): ChatResult => ({
   toolCalls,
   usage,
 });
+// Fase 5: plan-first — scripted models start with update_plan, because the
+// loop nudges (and discards) a first tool batch without a plan.
+const plan = (id: string) =>
+  call(id, "update_plan", {
+    items: [{ text: "Kerjakan tugas", status: "doing" }],
+  });
 const finalText = (text: string): ChatResult => ({
   text,
   toolCalls: [],
@@ -68,16 +75,22 @@ afterEach(async () => {
   while (open.length > 0) await open.pop()?.();
 });
 
-async function boot(responses: ChatResult[]) {
+async function boot(
+  responses: ChatResult[],
+  cfgOverride: Partial<Config> = {},
+) {
   const base = await mkdtemp(join(tmpdir(), "bikinin-srv-"));
   await mkdir(join(base, "ws"));
   const workspace = await realpath(join(base, "ws"));
   await writeFile(join(base, "secret.txt"), "di luar workspace");
-  const manager = new RunManager(cfg, {
-    workspace,
-    systemPrompt: "sys",
-    llm: scripted(responses),
-  });
+  const manager = new RunManager(
+    { ...cfg, ...cfgOverride },
+    {
+      workspace,
+      systemPrompt: "sys",
+      llm: scripted(responses),
+    },
+  );
   const server = createAppServer(manager, workspace);
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   open.push(
@@ -148,6 +161,7 @@ describe("web server", () => {
 
   it("runs an agent end to end and streams ordered SSE events", async () => {
     const { url, workspace } = await boot([
+      withCalls(plan("t0")),
       withCalls(
         call("t1", "write_file", {
           path: "index.html",
@@ -187,6 +201,7 @@ describe("web server", () => {
 
   it("holds a risky command until the user answers, and rejects a second run meanwhile", async () => {
     const { url, manager } = await boot([
+      withCalls(plan("t0")),
       withCalls(call("t1", "run_command", { command: "npm install" })),
       finalText("ok"),
     ]);
@@ -223,6 +238,7 @@ describe("web server", () => {
 
   it("stop ends a run waiting for approval with status stopped", async () => {
     const { url, manager } = await boot([
+      withCalls(plan("t0")),
       withCalls(call("t1", "run_command", { command: "npm install" })),
     ]);
     const { run_id } = (await (
@@ -236,6 +252,124 @@ describe("web server", () => {
     await waitFor(() => rec.finished);
     const last = rec.events.at(-1);
     expect(last?.type).toBe("run_finished");
+  });
+
+  it("resumes a budget_exceeded run with a fresh budget", async () => {
+    const { url } = await boot(
+      [
+        withCalls(plan("t0")),
+        withCalls(
+          call("t1", "write_file", {
+            path: "index.html",
+            content: "<h1>Kopi</h1>",
+          }),
+        ),
+        finalText("Lanjut selesai."),
+      ],
+      { BIKININ_MAX_STEPS: 1 },
+    );
+    const first = (await (
+      await post(`${url}/api/runs`, { message: "buat halaman" })
+    ).json()) as { run_id: string; session_id: string };
+    const events1 = parseSse(
+      await (await fetch(`${url}/api/runs/${first.run_id}/events`)).text(),
+    );
+    expect(events1.at(-1)).toMatchObject({
+      type: "run_finished",
+      status: "budget_exceeded",
+    });
+    const resumed = await post(`${url}/api/runs/${first.run_id}/resume`, {});
+    expect(resumed.status).toBe(201);
+    const { run_id, session_id } = (await resumed.json()) as {
+      run_id: string;
+      session_id: string;
+    };
+    expect(run_id).not.toBe(first.run_id);
+    expect(session_id).toBe(first.session_id);
+    const events2 = parseSse(
+      await (await fetch(`${url}/api/runs/${run_id}/events`)).text(),
+    );
+    expect(events2.at(-1)).toMatchObject({
+      type: "run_finished",
+      status: "completed",
+    });
+    // a completed run cannot resume again, and an unknown run is a 404
+    expect((await post(`${url}/api/runs/${run_id}/resume`, {})).status).toBe(
+      409,
+    );
+    expect((await post(`${url}/api/runs/run_deadbeef/resume`, {})).status).toBe(
+      404,
+    );
+  });
+
+  it("replays a session's events from the .jsonl log after a restart", async () => {
+    const base = await mkdtemp(join(tmpdir(), "bikinin-replay-"));
+    await mkdir(join(base, "ws"));
+    const workspace = await realpath(join(base, "ws"));
+    const bootManager = async (manager: RunManager) => {
+      await manager.init();
+      const server = createAppServer(manager, workspace);
+      await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+      open.push(
+        () =>
+          new Promise<void>((r) => {
+            server.closeAllConnections();
+            server.close(() => r());
+          }),
+      );
+      return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    };
+    const manager1 = new RunManager(cfg, {
+      workspace,
+      systemPrompt: "sys",
+      llm: scripted([
+        withCalls(plan("t0")),
+        withCalls(
+          call("t1", "write_file", {
+            path: "index.html",
+            content: "<h1>Kopi</h1>",
+          }),
+        ),
+        finalText("Selesai."),
+      ]),
+    });
+    const url1 = await bootManager(manager1);
+    const started = (await (
+      await post(`${url1}/api/runs`, { message: "buat halaman" })
+    ).json()) as { run_id: string; session_id: string };
+    await (await fetch(`${url1}/api/runs/${started.run_id}/events`)).text();
+    // Persistence happens after run_finished, so wait for the files on disk.
+    await waitFor(() =>
+      exists(
+        join(workspace, ".bikinin", "sessions", `${started.session_id}.json`),
+      ),
+    );
+    await waitFor(async () => {
+      const evs = await readSessionEvents(workspace, started.session_id);
+      return evs.some((e) => e.type === "run_finished");
+    });
+
+    // Server 2 (restart): same workspace, fresh manager + init().
+    const manager2 = new RunManager(cfg, {
+      workspace,
+      systemPrompt: "sys",
+      llm: scripted([finalText("x")]),
+    });
+    expect(await manager2.init()).toBe(1);
+    const url2 = await bootManager(manager2);
+    const detail = (await (
+      await fetch(`${url2}/api/sessions/${started.session_id}`)
+    ).json()) as {
+      session_id: string;
+      runs: Array<{ run_id: string; events: AgentEvent[] }>;
+    };
+    expect(detail.runs).toHaveLength(1);
+    expect(detail.runs[0].run_id).toBe(started.run_id);
+    expect(detail.runs[0].events[0].type).toBe("run_started");
+    expect(detail.runs[0].events.at(-1)?.type).toBe("run_finished");
+    expect(detail.runs[0].events.some((e) => e.type === "file_changed")).toBe(
+      true,
+    );
   });
 
   it("remembers earlier messages of the same session, and forgets for a new one", async () => {
@@ -306,6 +440,7 @@ describe("web server", () => {
   it("restores sessions and long-term memory across a server restart", async () => {
     const seen: string[][] = [];
     const responses = [
+      withCalls(plan("t0")),
       withCalls(
         call("t1", "write_file", {
           path: "index.html",
@@ -414,20 +549,21 @@ describe("web server", () => {
     expect(third.session_id).toBe(first.session_id);
     await (await fetch(`${url2}/api/runs/${third.run_id}/events`)).text();
     // The restored session history is replayed…
-    // (seen[0] and seen[1] are both run 1: tool call, then final text.)
-    expect(seen[3]).toContain(
+    // (seen[0..2] are run 1: plan, tool call, then final text.)
+    expect(seen[4]).toContain(
       "namaku Rizqi, panggil aku Qi. Buat halaman kopi.",
     );
     // …and the long-term memory is injected into the system prompt,
     // including the list of other recent sessions.
-    expect(seen[3][0]).toContain("Memori dari obrolan sebelumnya");
-    expect(seen[3][0]).toContain("namaku Rizqi, panggil aku Qi");
-    expect(seen[3][0]).toContain("Sesi terakhir:");
-    expect(seen[3][0]).toContain("proyek kedua");
+    expect(seen[4][0]).toContain("Memori dari obrolan sebelumnya");
+    expect(seen[4][0]).toContain("namaku Rizqi, panggil aku Qi");
+    expect(seen[4][0]).toContain("Sesi terakhir:");
+    expect(seen[4][0]).toContain("proyek kedua");
   });
 
   it("writes every event to the session .jsonl log (valid NDJSON, no secrets)", async () => {
     const { url, workspace } = await boot([
+      withCalls(plan("t0")),
       withCalls(
         call("t1", "write_file", {
           path: "index.html",
@@ -486,6 +622,7 @@ describe("web server", () => {
 
   it("lists sessions with replay, files and a zip download, and lists skills", async () => {
     const { url } = await boot([
+      withCalls(plan("t0")),
       withCalls(
         call("t1", "write_file", {
           path: "index.html",

@@ -14,6 +14,9 @@ const LimitsSchema = z.object({
     .min(1)
     .default(join(homedir(), "bikinin-workspace")),
   BIKININ_MAX_VIDEO_SECONDS: z.coerce.number().int().positive().default(30),
+  // Model router (Fase 7): on by default; off/false/0 disables it.
+  // Optional so older hand-built Config literals still compile.
+  BIKININ_ROUTER: z.string().optional(),
 });
 
 export interface Config extends z.infer<typeof LimitsSchema> {

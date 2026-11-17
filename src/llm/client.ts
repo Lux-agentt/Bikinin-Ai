@@ -43,8 +43,37 @@ export interface ChatResult {
   model?: string;
 }
 
+export interface VisionRequest {
+  /** Raw base64 image data (no `data:` prefix). */
+  imageBase64: string;
+  mime: "image/png" | "image/jpeg" | "image/webp";
+  prompt: string;
+  /** Max output tokens for the description. Defaults to 1024. */
+  maxTokens?: number;
+  /**
+   * Model to ask. The fallback client fills this in per provider; a direct
+   * client call without it fails with a clear error instead of guessing.
+   */
+  model?: string;
+}
+
+export interface VisionResult {
+  text: string;
+  model: string;
+  /** Provider name. Absent on a direct client call, which does not know it. */
+  provider?: string;
+  /** Token usage, when the provider reports it (for cost accounting). */
+  usage?: Usage;
+}
+
 export interface LlmClient {
   chat(params: ChatParams): Promise<ChatResult>;
+  describeImage?(req: VisionRequest): Promise<VisionResult>;
+}
+
+/** An LlmClient that always supports describeImage (the fallback client). */
+export interface VisionCapableLlm extends LlmClient {
+  describeImage(req: VisionRequest): Promise<VisionResult>;
 }
 
 export interface LlmOptions {
@@ -128,6 +157,18 @@ function classify(err: unknown): { retryable: boolean; error: AgentError } {
   };
 }
 
+/** True when the provider rejected an image input (not a retryable error). */
+function isUnsupportedImageError(err: unknown): boolean {
+  if (!(err instanceof APIError)) return false;
+  if (err.status !== 400 && err.status !== 422) return false;
+  return /image|vision|multimodal/i.test(err.message);
+}
+
+/** One vision call costs at most this long; the image plus prompt are small. */
+const VISION_TIMEOUT_MS = 60_000;
+/** Default description length cap (output tokens). */
+const VISION_DEFAULT_MAX_TOKENS = 1024;
+
 export function createOpenAiLlm(opts: LlmOptions): LlmClient {
   const client = new OpenAI({
     baseURL: opts.baseURL,
@@ -209,6 +250,83 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
           const { retryable, error } = classify(err);
           // Only retry when nothing was streamed yet, so text is never duplicated.
           if (retryable && !received && attempt < maxRetries) {
+            await sleep(1000 * 2 ** attempt);
+            continue;
+          }
+          throw error;
+        }
+      }
+    },
+
+    async describeImage(req) {
+      const model = req.model;
+      if (!model) {
+        throw new AgentError(
+          "provider_error",
+          "describeImage butuh model (diisi fallback per provider)",
+        );
+      }
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const res = await client.chat.completions.create(
+            {
+              model,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: req.prompt },
+                    {
+                      type: "image_url",
+                      image_url: {
+                        url: `data:${req.mime};base64,${req.imageBase64}`,
+                      },
+                    },
+                  ],
+                },
+              ],
+              max_tokens: req.maxTokens ?? VISION_DEFAULT_MAX_TOKENS,
+              stream: false,
+            },
+            { timeout: VISION_TIMEOUT_MS },
+          );
+          // The SDK types message content as string | null, but some
+          // providers return an array of text parts; handle both.
+          const raw = res.choices[0]?.message?.content as unknown;
+          const text =
+            typeof raw === "string"
+              ? raw
+              : Array.isArray(raw)
+                ? raw
+                    .filter(
+                      (part): part is { type: "text"; text: string } =>
+                        typeof part === "object" &&
+                        part !== null &&
+                        (part as { type?: unknown }).type === "text" &&
+                        typeof (part as { text?: unknown }).text === "string",
+                    )
+                    .map((part) => part.text)
+                    .join("")
+                : "";
+          const usage: Usage = {
+            input_tokens: res.usage?.prompt_tokens ?? 0,
+            output_tokens: res.usage?.completion_tokens ?? 0,
+            cached_tokens: res.usage?.prompt_tokens_details?.cached_tokens ?? 0,
+          };
+          return { text, model, usage };
+        } catch (err) {
+          // A model that cannot take images must not be retried: the next
+          // provider in the fallback chain may support them.
+          if (isUnsupportedImageError(err)) {
+            throw new AgentError(
+              "provider_error",
+              `Model ${model} tidak mendukung image input`,
+              false,
+              true,
+            );
+          }
+          const { retryable, error } = classify(err);
+          if (retryable && attempt < maxRetries) {
             await sleep(1000 * 2 ** attempt);
             continue;
           }

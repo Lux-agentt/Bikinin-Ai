@@ -15,6 +15,7 @@ import { resolveInWorkspace } from "../safety/paths.js";
 import { listSkills, REPO_SKILLS_DIR } from "../skills/loader.js";
 import { BusyError, NotConfiguredError, type RunManager } from "./runs.js";
 import { buildZip } from "./zip.js";
+import { listCheckpoints } from "./checkpoints.js";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../../public/", import.meta.url));
 const MAX_BODY = 64 * 1024;
@@ -27,6 +28,7 @@ const ASSETS: Record<string, { file: string; type: string }> = {
   "/app.js": { file: "app.js", type: "text/javascript; charset=utf-8" },
   "/app.css": { file: "app.css", type: "text/css; charset=utf-8" },
   "/md.js": { file: "md.js", type: "text/javascript; charset=utf-8" },
+  "/ledger.js": { file: "ledger.js", type: "text/javascript; charset=utf-8" },
   "/fonts/inter-latin-wght-normal.woff2": { file: "fonts/inter-latin-wght-normal.woff2", type: "font/woff2" },
   "/fonts/source-serif-4-latin-wght-normal.woff2": { file: "fonts/source-serif-4-latin-wght-normal.woff2", type: "font/woff2" },
   "/fonts/source-serif-4-latin-wght-italic.woff2": { file: "fonts/source-serif-4-latin-wght-italic.woff2", type: "font/woff2" },
@@ -239,14 +241,35 @@ async function route(
     return sendJson(res, 200, await listSkills(REPO_SKILLS_DIR));
   }
 
+  // Fase 5: checkpoints. Restore is an explicit user action (POST only)
+  // and is recorded as a `checkpoint_restored` event in the session log.
+  if (method === "GET" && path === "/api/checkpoints") {
+    return sendJson(res, 200, await listCheckpoints(workspace));
+  }
+
+  const cp = path.match(/^\/api\/checkpoints\/(cp_[a-f0-9]{8})\/restore$/);
+  if (method === "POST" && cp) {
+    try {
+      return sendJson(res, 200, await manager.restoreCheckpoint(cp[1]));
+    } catch (err) {
+      throw new HttpError(
+        404,
+        err instanceof Error ? err.message : "checkpoint tidak ditemukan",
+      );
+    }
+  }
+
   const sm = path.match(
-    /^\/api\/sessions\/(s_[a-f0-9]{8})(\/files|\/download\.zip)?$/,
+    /^\/api\/sessions\/(s_[a-f0-9]{8})(\/files|\/download\.zip|\/ledger)?$/,
   );
   if (method === "GET" && sm) {
     const [, sessionId, action] = sm;
-    const sess = manager.getSession(sessionId);
+    const sess = await manager.getSession(sessionId);
     if (!sess) throw new HttpError(404, "sesi tidak ditemukan");
     if (!action) return sendJson(res, 200, sess);
+    if (action === "/ledger") {
+      return sendJson(res, 200, await manager.getLedger(sessionId));
+    }
     if (action === "/files") {
       return sendJson(res, 200, await manager.listFiles());
     }
@@ -286,7 +309,7 @@ async function route(
   }
 
   const m = path.match(
-    /^\/api\/runs\/(run_[a-f0-9]{8})\/(events|stop|approval)$/,
+    /^\/api\/runs\/(run_[a-f0-9]{8})\/(events|stop|approval|resume)$/,
   );
   if (m) {
     const [, runId, action] = m;
@@ -295,6 +318,17 @@ async function route(
     if (method === "POST" && action === "stop") {
       if (!manager.stop(runId)) throw new HttpError(404, "run tidak ditemukan");
       return sendJson(res, 202, { ok: true });
+    }
+    if (method === "POST" && action === "resume") {
+      const r = manager.resume(runId);
+      if ("error" in r) {
+        if (r.error === "not-found")
+          throw new HttpError(404, "run tidak ditemukan");
+        if (r.error === "busy")
+          throw new HttpError(409, "masih ada run yang berjalan");
+        throw new HttpError(409, "run ini tidak bisa dilanjutkan");
+      }
+      return sendJson(res, 201, r);
     }
     if (method === "POST" && action === "approval") {
       const parsed = ApprovalBody.safeParse(await readJson(req));

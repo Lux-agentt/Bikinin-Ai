@@ -9,15 +9,15 @@
 
 **Urutan kerja (ikuti persis):**
 
-| Urutan | Kerjakan | Rujukan |
-|---|---|---|
-| 1 | Siapkan repo GitHub, Codespace, rahasia, dependensi | Bagian 4, 5, dan 13 |
-| 2 | Cek penyedia LLM (`check-provider`) | Bagian 6 |
-| 3 | **Fase 0**: agent loop di terminal | Bagian 7, Lampiran A dan B |
-| 4 | **Fase 1**: keamanan dan stabilitas | Bagian 7 |
-| 5 | **Fase 4**: web UI (wajib lebih awal, pemilik hanya punya HP) | Bagian 7, 8, dan 13 |
-| 6 | **Fase 2**: sistem skill, termasuk skill `nextjs-cloudflare` | Bagian 7, 14, Lampiran C dan E |
-| 7 | **Fase 3**: Remotion | Bagian 7 |
+| Urutan | Kerjakan                                                      | Rujukan                        |
+| ------ | ------------------------------------------------------------- | ------------------------------ |
+| 1      | Siapkan repo GitHub, Codespace, rahasia, dependensi           | Bagian 4, 5, dan 13            |
+| 2      | Cek penyedia LLM (`check-provider`)                           | Bagian 6                       |
+| 3      | **Fase 0**: agent loop di terminal                            | Bagian 7, Lampiran A dan B     |
+| 4      | **Fase 1**: keamanan dan stabilitas                           | Bagian 7                       |
+| 5      | **Fase 4**: web UI (wajib lebih awal, pemilik hanya punya HP) | Bagian 7, 8, dan 13            |
+| 6      | **Fase 2**: sistem skill, termasuk skill `nextjs-cloudflare`  | Bagian 7, 14, Lampiran C dan E |
+| 7      | **Fase 3**: Remotion                                          | Bagian 7                       |
 
 Kerjakan **satu fase sekali**. Berhenti di akhir tiap fase dan tunjukkan cara pemilik mencobanya. Jangan lompat ke fase berikutnya.
 
@@ -47,6 +47,8 @@ Kamu (agent pembangun) bertugas **membangun Bikinin AI itu sendiri**, bukan menj
 6. Commit per langkah logis (`feat:`, `fix:`, `chore:`).
 7. Dependensi seminimal mungkin, versi di-pin. Sebelum menambah paket, jelaskan alasannya.
 8. Jangan menebak API library dari ingatan: baca dokumentasi resminya saat ragu.
+9. Hemat token di semua run (Fase 5, ditegakkan di kode, bukan cuma di prompt): rencana dulu (maks 5 langkah) sebelum tool call pertama; gagal yang sama 3x berturut-turut = berhenti dan tanya pemilik, jangan muter; jangan baca ulang file yang tidak berubah di run yang sama; output tool ringkas; ringkas konteks saat mendekati batas (ekstraktif, tanpa model berbayar baru).
+10. Subagent (`delegate`) hanya untuk tugas yang benar-benar terbantu riset paralel; jangan dipakai untuk hal sepele yang bisa dikerjakan langsung. Ingat kuota OpenRouter gratis 50 request/hari per akun — subagent membakarnya cepat.
 
 ## 4. Struktur repo (target)
 
@@ -166,13 +168,49 @@ Karena pemilik hanya memakai HP, UI web **wajib** dan dikerjakan sebelum Fase 2 
 
 Baca Bagian 8. Acuan tampilan: `design/bikinin-ai-ui.html` (prototipe simulasi; semua datanya palsu). Langkah:
 
-- [ ] Server HTTP dengan endpoint di Bagian 8.4 dan SSE, dijalankan lewat `bikinin serve --port 3000`.
-- [ ] Dilayani lewat port Codespaces dengan visibilitas **Private** (Bagian 13). Jangan pernah Public.
-- [ ] Sambungkan UI ke SSE; ganti `STEPS` dan `PAGE` buatan di prototipe dengan kejadian sungguhan.
-- [ ] Tambah dialog persetujuan perintah, pohon file, penampil kode, unduh ZIP.
-- [ ] Preview memakai `<iframe sandbox="allow-scripts">` (tanpa `allow-same-origin`).
-- [ ] Batas biaya dan langkah benar-benar menghentikan run (di prototipe hanya toast).
-- [ ] Kunci API **tidak pernah** ada di browser; semua panggilan LLM lewat server.
+- [x] Server HTTP dengan endpoint di Bagian 8.4 dan SSE, dijalankan lewat `bikinin serve --port 3000`.
+- [x] Dilayani lewat port Codespaces dengan visibilitas **Private** (Bagian 13). Jangan pernah Public.
+- [x] Sambungkan UI ke SSE; ganti `STEPS` dan `PAGE` buatan di prototipe dengan kejadian sungguhan.
+- [x] Tambah dialog persetujuan perintah, pohon file, penampil kode, unduh ZIP.
+- [x] Preview memakai `<iframe sandbox="allow-scripts">` (tanpa `allow-same-origin`).
+- [x] Batas biaya dan langkah benar-benar menghentikan run (di prototipe hanya toast).
+- [x] Kunci API **tidak pernah** ada di browser; semua panggilan LLM lewat server.
+
+### Fase 5: Cari, checkpoint, subagent, dan hemat token
+
+Supaya agent makin mirip Claude Code / Codex / Grok: bisa mencari di internet, bisa kembali ke keadaan sebelum run (checkpoint), bisa mendelegasikan riset ke subagent, bisa menerima perintah suara dari HP, dan — yang paling penting — bekerja to the point tanpa memboroskan token.
+
+- [x] Tool `web_search` (DuckDuckGo Lite, tanpa API key, tanpa kartu): maks 5 hasil, ringkas, timeout 8 detik; query tidak boleh berisi rahasia.
+- [x] Checkpoint otomatis di awal tiap run: snapshot commit git via temp index bila workspace adalah repo git, salinan file di `workspace/.bikinin/checkpoints/` bila bukan. Endpoint list + restore; restore HANYA atas aksi eksplisit pengguna, dan tercatat sebagai event.
+- [x] Tool `delegate`: subagent dengan budget langkah/biaya sendiri, tool baca saja (tidak boleh menulis file atau memanggil `delegate` lagi), maks 2 berjalan bersamaan. Peringatan kuota tampil di UI/event saat subagent dipakai: OpenRouter gratis cuma 50 request/hari per akun, subagent membakarnya cepat.
+- [x] Tool `update_plan`: rencana singkat maks 5 langkah SEBELUM tool call pertama; panel Todo di UI mengikuti event `plan_updated`.
+- [x] Input suara di UI memakai Web Speech API browser (gratis, tanpa key, tanpa biaya server); tombol disembunyikan bila browser tidak mendukung.
+- [x] Aturan hemat token ditegakkan di kode, bukan cuma di prompt (lihat §3 butir 9-10): retry budget 3x lalu berhenti dan tanya; `read_file` tidak dibaca ulang bila file tidak berubah; compaction ekstraktif saat konteks mendekati batas.
+
+**Selesai jika:** "cari harga domain .id terbaru" dijawab dari hasil search asli; run yang merusak file bisa dipulihkan lewat tombol di UI; subagent mengembalikan ringkasan riset dan biayanya tercatat di total run; rencana terlihat di panel Todo; dan run yang gagal 3x dengan cara yang sama berhenti sendiri, bukan muter.
+
+### Fase 6: Makin pintar — verifikasi, ingatan pelajaran, vision, penutup gap vs Claude Code
+
+- [x] Self-check: agent memeriksa hasil sendiri sebelum menyatakan selesai (build/test/lint yang relevan, atau baca ulang jawaban terhadap permintaan awal), maks 2 putaran perbaikan, hasil tercatat sebagai event.
+- [x] Ingatan episodik: pelajaran dari run yang gagal/berulang disimpan ke `workspace/.bikinin/lessons.md` (maks 32 KB, tanpa rahasia); pelajaran relevan di-inject ke system prompt run berikutnya (cocok kata kunci).
+- [x] Vision: tool `inspect_image` mengirim gambar ke model yang mendukung image input; fallback ke model berikutnya yang mendukung, atau jujur melapor bila tidak tersedia.
+- [x] Plan mode: tugas besar meminta persetujuan rencana sebelum mengubah file (pakai dialog approval yang sudah ada).
+- [x] Diff review: perubahan file tampil sebagai ringkasan diff di UI/event, tidak diterapkan diam-diam.
+- [x] Tool `git`: status, diff, log, commit, branch — hanya di workspace sesi, tanpa push.
+- [x] MCP client minimal: memanggil tool dari satu MCP server eksternal yang dikonfigurasi pemilik + satu server contoh yang jalan.
+
+**Selesai jika:** "buatkan website lalu perbaiki sampai lolos cek sendiri" selesai dengan verifikasi tercatat; pelajaran dari run gagal muncul di run mirip berikutnya; screenshot preview dinilai dengan benar; rencana besar ditahan sampai disetujui; `git commit` tercatat; MCP contoh terpanggil.
+
+### Fase 7: Harness profesional (pengukuran, ledger, router, sandbox)
+
+Targetnya: agent yang bekerja **hampir mirip manusia** (near-human parity) — memahami maksud dari pesan yang samar, bertanya saat ragu, menjelaskan alasan, mengakui kesalahan, dan mengingat konteks. Klaim itu hanya berarti kalau DIUKUR — jadi inti Fase 7 adalah pengukuran + keandalan + routing, bukan sekadar fitur baru. Jangan klaim "mengalahkan manusia" di mana pun (dokumen, kode, atau laporan).
+
+- [x] Eval benchmark `npm run eval`: 10-20 tugas standar (perbaiki bug, bangun fitur kecil, riset + jawab, operasi file, kasus edge, plus tugas perilaku: pesan samar, instruksi ambigu, kesalahan yang harus diakui); kriteria lolos/gagal OTOMATIS (tes, pemeriksaan file/output — bukan penilaian subjektif model); skor per tugas + total, waktu, token/biaya per tugas; log di `workspace/.bikinin/evals/<tanggal>.json`; jalan dengan model dummy untuk CI dan model asli manual; cara mencatat baseline manusia didokumentasikan sebagai pembanding.
+- [x] Ledger biaya/waktu per run: token in/out, estimasi biaya USD, durasi, jumlah tool call — tersimpan di log sesi dan terlihat di UI (panel run).
+- [x] Model router: pilih model awal berdasarkan jenis tugas (coding → model coding, penalaran → model reasoning, ringan → model tercepat); fallback chain tetap sebagai jaring pengaman; transparan (event mencatat model + alasan); bisa dimatikan via `BIKININ_ROUTER=off` kembali ke urutan tetap; hemat kuota OpenRouter :free (50/hari per akun).
+- [x] Sandbox hardening: audit dan perbaiki celah eksekusi shell/file (cwd jail, blokir path di luar workspace, batasi network dari kode tidak dipercaya tanpa merusak tool sah seperti web_search); batas sandbox didokumentasikan dengan jujur.
+
+**Selesai jika:** `npm run eval` jalan end-to-end dengan model dummy dan menghasilkan skor + log; ledger mencatat angka yang konsisten dengan provider dan terlihat di UI; router memilih model yang benar per jenis tugas; audit sandbox menutup minimal satu celah nyata atau mendokumentasikan batasnya dengan bukti.
 
 ## 8. Kontrak kejadian (event contract)
 
@@ -189,56 +227,70 @@ Satu format pesan untuk **CLI** dan **UI**. Agent hanya memanggil `emit(type, da
 ### 8.2 Amplop (ada di semua kejadian)
 
 ```json
-{ "v": 1, "seq": 7, "ts": "2026-11-16T10:21:04.512Z", "run_id": "run_8fk2", "type": "..." }
+{
+  "v": 1,
+  "seq": 7,
+  "ts": "2026-11-16T10:21:04.512Z",
+  "run_id": "run_8fk2",
+  "type": "..."
+}
 ```
 
 - `seq` naik satu per kejadian, mulai dari 0 per run. Dipakai untuk urutan dan melanjutkan SSE (`Last-Event-ID`).
 
 ### 8.3 Transport
 
-| Konteks | Cara |
-|---|---|
-| CLI | NDJSON ke stdout dengan `--json`; tanpa flag, CLI merender teks cantik dari kejadian yang sama |
-| Web | SSE `GET /api/runs/:run_id/events`, `id: <seq>`, `event: <type>`, `data: <json>` |
-| Disk | JSONL, satu kejadian per baris |
+| Konteks | Cara                                                                                           |
+| ------- | ---------------------------------------------------------------------------------------------- |
+| CLI     | NDJSON ke stdout dengan `--json`; tanpa flag, CLI merender teks cantik dari kejadian yang sama |
+| Web     | SSE `GET /api/runs/:run_id/events`, `id: <seq>`, `event: <type>`, `data: <json>`               |
+| Disk    | JSONL, satu kejadian per baris                                                                 |
 
 ### 8.4 Endpoint HTTP (UI → server)
 
-| Method | Path | Fungsi |
-|---|---|---|
-| POST | `/api/runs` | Mulai run. Body: `StartRunBody`. Balasan: `{ run_id, session_id }` |
-| GET | `/api/runs/:id/events` | Aliran SSE; mendukung `Last-Event-ID` |
-| POST | `/api/runs/:id/stop` | Hentikan run (kejadian akhir: `run_finished` status `stopped`) |
-| POST | `/api/runs/:id/approval` | Jawab persetujuan. Body: `ApprovalBody` |
-| POST | `/api/runs/:id/resume` | Lanjutkan run `budget_exceeded` setelah pengguna menaikkan batas |
-| GET | `/api/sessions` | Daftar sesi (untuk panel Riwayat) |
-| GET | `/api/sessions/:id` | Replay: seluruh kejadian sesi |
-| GET | `/api/sessions/:id/files` | Pohon file workspace sesi |
-| GET | `/api/sessions/:id/download.zip` | Unduh proyek |
-| GET | `/api/skills` | Daftar skill (nama + deskripsi dari frontmatter `SKILL.md`) |
+| Method | Path                             | Fungsi                                                                                                   |
+| ------ | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/runs`                      | Mulai run. Body: `StartRunBody`. Balasan: `{ run_id, session_id }`                                       |
+| GET    | `/api/runs/:id/events`           | Aliran SSE; mendukung `Last-Event-ID`                                                                    |
+| POST   | `/api/runs/:id/stop`             | Hentikan run (kejadian akhir: `run_finished` status `stopped`)                                           |
+| POST   | `/api/runs/:id/approval`         | Jawab persetujuan. Body: `ApprovalBody`                                                                  |
+| POST   | `/api/runs/:id/resume`           | Lanjutkan run `budget_exceeded` setelah pengguna menaikkan batas                                         |
+| GET    | `/api/sessions`                  | Daftar sesi (untuk panel Riwayat)                                                                        |
+| GET    | `/api/sessions/:id`              | Replay: seluruh kejadian sesi                                                                            |
+| GET    | `/api/sessions/:id/files`        | Pohon file workspace sesi                                                                                |
+| GET    | `/api/sessions/:id/download.zip` | Unduh proyek                                                                                             |
+| GET    | `/api/skills`                    | Daftar skill (nama + deskripsi dari frontmatter `SKILL.md`)                                              |
+| GET    | `/api/checkpoints`               | Daftar checkpoint (id, waktu, metode, jumlah file)                                                       |
+| POST   | `/api/checkpoints/:id/restore`   | Pulihkan workspace ke checkpoint (aksi eksplisit pengguna; tercatat sebagai event `checkpoint_restored`) |
 
 Untuk CLI, "jawab persetujuan" = prompt `y/N` di terminal, bukan HTTP.
 
 ### 8.5 Daftar kejadian
 
-| Type | Kapan | Field penting |
-|---|---|---|
-| `run_started` | Awal run | `model`, `effort`, `limits`, `user_message` |
-| `text_delta` | Teks asisten mengalir | `text` (tambahkan ke akhir) |
-| `plan_updated` | Rencana berubah | `items[{id,text,status}]` |
-| `tool_call_started` | Tool mulai | `call_id`, `step`, `tool`, `label`, `args` |
-| `tool_call_finished` | Tool selesai | `call_id`, `ok`, `summary`, `output_preview`, `duration_ms` |
-| `approval_requested` | Butuh izin pengguna | `approval_id`, `command`, `risk`, `reason` |
-| `approval_resolved` | Izin dijawab | `decision`, `by` (`user`/`policy`) |
-| `file_changed` | File dibuat/diubah/dihapus | `path` (relatif), `op`, `bytes`, `diff` |
-| `usage` | Setelah tiap panggilan LLM | token, `cost_usd`, `totals` |
-| `budget_warning` | 80% dan 100% batas | `kind` (`steps`/`cost`), `used`, `limit` |
-| `preview_ready` | Ada pratinjau | `kind` (`web`/`video`), `url` |
-| `artifact_ready` | Ada berkas hasil | `kind` (`zip`/`video`/`file`), `path`, `mime` |
-| `error` | Ada masalah | `code`, `message`, `retryable` |
-| `run_finished` | Akhir run (selalu ada) | `status`, `summary`, `totals`, `resumable` |
+| Type                  | Kapan                                               | Field penting                                                                                                            |
+| --------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `run_started`         | Awal run                                            | `model`, `effort`, `limits`, `user_message`, `route` opsional (`{category, reason, preferred_model}` dari router Fase 7) |
+| `text_delta`          | Teks asisten mengalir                               | `text` (tambahkan ke akhir)                                                                                              |
+| `plan_updated`        | Rencana berubah                                     | `items[{id,text,status}]`                                                                                                |
+| `checkpoint_created`  | Awal run, snapshot workspace dibuat                 | `checkpoint_id`, `method` (`git`/`copy`), `files`                                                                        |
+| `checkpoint_restored` | Pengguna memulihkan checkpoint                      | `checkpoint_id`, `files_restored`, `method`                                                                              |
+| `subagent_started`    | Subagent mulai                                      | `task`, `max_steps`, `max_cost_usd`, `quota_note`                                                                        |
+| `subagent_finished`   | Subagent selesai                                    | `task`, `status`, `summary`, `steps`, `cost_usd`                                                                         |
+| `tool_call_started`   | Tool mulai                                          | `call_id`, `step`, `tool`, `label`, `args`                                                                               |
+| `tool_call_finished`  | Tool selesai                                        | `call_id`, `ok`, `summary`, `output_preview`, `duration_ms`                                                              |
+| `approval_requested`  | Butuh izin pengguna                                 | `approval_id`, `command`, `risk`, `reason`                                                                               |
+| `approval_resolved`   | Izin dijawab                                        | `decision`, `by` (`user`/`policy`)                                                                                       |
+| `verification`        | Self-check selesai (Fase 6, sebelum `run_finished`) | `outcome` (`pass`/`fail`), `checks[{name, ok, detail}]`, `fixes` (putaran perbaikan yang sudah dipakai, maks 2)          |
+| `file_changed`        | File dibuat/diubah/dihapus                          | `path` (relatif), `op`, `bytes`, `diff`                                                                                  |
+| `usage`               | Setelah tiap panggilan LLM                          | token, `cost_usd`, `totals`                                                                                              |
+| `budget_warning`      | 80% dan 100% batas                                  | `kind` (`steps`/`cost`), `used`, `limit`                                                                                 |
+| `preview_ready`       | Ada pratinjau                                       | `kind` (`web`/`video`), `url`                                                                                            |
+| `artifact_ready`      | Ada berkas hasil                                    | `kind` (`zip`/`video`/`file`), `path`, `mime`                                                                            |
+| `error`               | Ada masalah                                         | `code`, `message`, `retryable`                                                                                           |
+| `run_finished`        | Akhir run (selalu ada)                              | `status`, `summary`, `totals`, `resumable`                                                                               |
 
 **Aturan urutan**
+
 - `run_started` selalu pertama, `run_finished` selalu terakhir, termasuk saat error atau stop.
 - Tiap `tool_call_started` punya tepat satu `tool_call_finished` (kecuali run dihentikan).
 - `approval_requested` muncul **di antara** `tool_call_started` dan `tool_call_finished` milik `call_id` yang sama; tool tidak jalan sebelum `approval_resolved` berisi `allow`.
@@ -250,21 +302,21 @@ Untuk CLI, "jawab persetujuan" = prompt `y/N` di terminal, bukan HTTP.
 
 ### 8.6 Pemetaan ke prototipe UI (`bikinin-ai-ui.html`)
 
-| Elemen di prototipe | Dibuat dari kejadian |
-|---|---|
-| Judul panel "Agent bekerja" / "Agent selesai" | `run_started` → `run_finished` |
-| Baris langkah (aktif → centang) | `tool_call_started` → `tool_call_finished` (`label`, `summary`) |
+| Elemen di prototipe                             | Dibuat dari kejadian                                                        |
+| ----------------------------------------------- | --------------------------------------------------------------------------- |
+| Judul panel "Agent bekerja" / "Agent selesai"   | `run_started` → `run_finished`                                              |
+| Baris langkah (aktif → centang)                 | `tool_call_started` → `tool_call_finished` (`label`, `summary`)             |
 | Ring batas langkah (`#ring`) dan jumlah langkah | `usage.totals.steps` / `limits.max_steps`; penuh saat `budget_warning` 100% |
-| Biaya di panel (`.pcost`) | `usage.totals.cost_usd` |
-| Chip model (`.pmchip`) | `run_started.model` + `effort` |
-| Timer | selisih `run_started.ts` dan `ts` terbaru |
-| Tombol stop | `POST /stop` lalu `run_finished` status `stopped` |
-| Kartu hasil (Preview / Unduh / Tautan) | `preview_ready`, `artifact_ready` |
-| Overlay preview (`iframe`) | `preview_ready.url` |
-| Panel Riwayat | `GET /api/sessions` (dari log JSONL) |
-| Dialog persetujuan (baru, belum ada) | `approval_requested` → `POST /approval` |
-| Pohon file dan penampil kode (baru) | `file_changed` + `GET /files` |
-| Toast limit | `budget_warning` |
+| Biaya di panel (`.pcost`)                       | `usage.totals.cost_usd`                                                     |
+| Chip model (`.pmchip`)                          | `run_started.model` + `effort`                                              |
+| Timer                                           | selisih `run_started.ts` dan `ts` terbaru                                   |
+| Tombol stop                                     | `POST /stop` lalu `run_finished` status `stopped`                           |
+| Kartu hasil (Preview / Unduh / Tautan)          | `preview_ready`, `artifact_ready`                                           |
+| Overlay preview (`iframe`)                      | `preview_ready.url`                                                         |
+| Panel Riwayat                                   | `GET /api/sessions` (dari log JSONL)                                        |
+| Dialog persetujuan (baru, belum ada)            | `approval_requested` → `POST /approval`                                     |
+| Pohon file dan penampil kode (baru)             | `file_changed` + `GET /files`                                               |
+| Toast limit                                     | `budget_warning`                                                            |
 
 ## 9. Standar kode
 
@@ -545,7 +597,10 @@ type Payload<T extends EventType> = Omit<
 /** Creates an emitter that stamps envelope fields and validates every event. */
 export function createEmitter(runId: string, sink: (e: AgentEvent) => void) {
   let seq = 0;
-  return function emit<T extends EventType>(type: T, data: Payload<T>): AgentEvent {
+  return function emit<T extends EventType>(
+    type: T,
+    data: Payload<T>,
+  ): AgentEvent {
     const event = AgentEvent.parse({
       v: PROTOCOL_VERSION,
       seq: seq++,
@@ -671,8 +726,8 @@ import { createEmitter, toNDJSON, toSSE } from "./events";
 
 // di CLI
 const emit = createEmitter(runId, (e) => {
-  process.stdout.write(toNDJSON(e));   // atau render teks cantik
-  sessionLog.write(toNDJSON(e));       // log JSONL ke disk
+  process.stdout.write(toNDJSON(e)); // atau render teks cantik
+  sessionLog.write(toNDJSON(e)); // log JSONL ke disk
 });
 
 // di server (SSE)
@@ -682,8 +737,11 @@ const emit = createEmitter(runId, (e) => {
 });
 
 emit("tool_call_started", {
-  call_id: "c1", step: 1, tool: "read_skill",
-  label: "Membaca skill website", args: { name: "website" },
+  call_id: "c1",
+  step: 1,
+  tool: "read_skill",
+  label: "Membaca skill website",
+  args: { name: "website" },
 });
 ```
 

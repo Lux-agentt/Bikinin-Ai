@@ -12,21 +12,47 @@ import {
 } from "../agent/loop.js";
 import type { Config } from "../config.js";
 import type { z } from "zod";
-import { createEmitter, StartRunBody, type AgentEvent } from "../events.js";
+import {
+  createEmitter,
+  StartRunBody,
+  type AgentEvent,
+  type EventType,
+  type RouteInfo,
+} from "../events.js";
 import type { LlmClient } from "../llm/client.js";
 import { createFallbackLlm } from "../llm/fallback.js";
+import { isRouterEnabled, routeProviders } from "../llm/router.js";
 import type { ProviderConfig } from "../llm/providers.js";
 import {
+  appendLessons,
   appendMemoryFacts,
   deleteSession,
   loadSessions,
   pruneSessions,
+  readLessonEntries,
   readMemoryEntries,
   saveSession,
   type PersistedSession,
 } from "./persistence.js";
-import { createEventLog, type EventLog } from "./event-log.js";
+import {
+  createEventLog,
+  readSessionEvents,
+  type EventLog,
+} from "./event-log.js";
+import {
+  createCheckpoint,
+  listCheckpoints,
+  restoreCheckpoint as restoreCheckpointOnDisk,
+} from "./checkpoints.js";
+import {
+  buildLedgerFromEvents,
+  ledgerFromSessionEvents,
+  loadLedger,
+  upsertLedger,
+  type RunLedger,
+} from "./ledger.js";
 import { MAX_SESSIONS, SessionHistory } from "../agent/history.js";
+import { buildLessonsContext, extractLessons } from "../agent/lessons.js";
 import { buildMemoryContext, extractFacts } from "../agent/memory.js";
 import { extractiveSummary } from "../agent/summarize.js";
 
@@ -40,6 +66,13 @@ export interface RunRecord {
   pending: Map<string, (allow: boolean) => void>;
   /** On-disk NDJSON log for this run's session (Fase 1). */
   log: EventLog;
+  /** Original prompt + provider, kept so a budget_exceeded run can resume. */
+  message: string;
+  provider: ProviderConfig;
+  /** Provider order chosen for this run (router output); the fallback LLM
+   *  tries them in this order. */
+  providers: ProviderConfig[];
+  effort: "sedang" | "tinggi";
 }
 
 /** Lightweight metadata for the history panel. The title is the first prompt.
@@ -148,20 +181,82 @@ export class RunManager {
       .sort((a, b) => b.updated_at - a.updated_at);
   }
 
-  /** One session with every run's events, for replay in the UI. */
-  getSession(sessionId: string): SessionDetail | undefined {
+  /** One session with every run's events, for replay in the UI.
+   *  In-memory events are the live source; after a restart they are gone,
+   *  so runs are filled in from the durable .jsonl log (Fase 1, §8.1.2). */
+  async getSession(sessionId: string): Promise<SessionDetail | undefined> {
     const m = this.meta.get(sessionId);
     if (!m) return undefined;
+    const runs: Array<{ run_id: string; events: AgentEvent[] }> = m.runIds.map(
+      (runId) => ({
+        run_id: runId,
+        events: this.runs.get(runId)?.events ?? [],
+      }),
+    );
+    const logged = await readSessionEvents(this.opts.workspace, sessionId);
+    const byRun = new Map<string, AgentEvent[]>();
+    for (const e of logged) {
+      const list = byRun.get(e.run_id) ?? [];
+      list.push(e);
+      byRun.set(e.run_id, list);
+    }
+    for (const [runId, events] of byRun) {
+      const existing = runs.find((r) => r.run_id === runId);
+      if (existing) {
+        if (existing.events.length === 0) existing.events = events;
+      } else {
+        runs.push({ run_id: runId, events });
+      }
+    }
+    runs.sort((a, b) => {
+      const ta = a.events[0]?.ts ?? "";
+      const tb = b.events[0]?.ts ?? "";
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
+    });
     return {
       session_id: sessionId,
       title: m.title,
       prompts: m.prompts,
       updated_at: m.updatedAt,
-      runs: m.runIds.map((runId) => ({
-        run_id: runId,
-        events: this.runs.get(runId)?.events ?? [],
-      })),
+      runs,
     };
+  }
+
+  /**
+   * Per-run cost/time ledgers of a session, oldest first (Fase 7).
+   * Persisted file first; when it is missing, the ledgers are rebuilt from
+   * the durable .jsonl log and saved. Live (unfinished) runs are overlaid
+   * from in-memory events so the UI sees numbers while a run is running.
+   * undefined when the session does not exist.
+   */
+  async getLedger(sessionId: string): Promise<RunLedger[] | undefined> {
+    if (!this.meta.get(sessionId)) return undefined;
+    let ledgers = await loadLedger(this.opts.workspace, sessionId);
+    if (ledgers.length === 0) {
+      ledgers = await ledgerFromSessionEvents(this.opts.workspace, sessionId);
+      if (ledgers.length > 0) {
+        // Backfill so the next read is a plain file load.
+        for (const l of ledgers) {
+          await upsertLedger(this.opts.workspace, sessionId, l).catch(() => {});
+        }
+      }
+    }
+    const m = this.meta.get(sessionId);
+    if (m) {
+      for (const runId of m.runIds) {
+        const rec = this.runs.get(runId);
+        if (!rec || rec.events.length === 0) continue;
+        const live = buildLedgerFromEvents(rec.events, runId);
+        if (!live) continue;
+        const i = ledgers.findIndex((l) => l.run_id === runId);
+        if (i >= 0) ledgers[i] = live;
+        else ledgers.push(live);
+      }
+      ledgers.sort((a, b) =>
+        (a.started_at ?? "") < (b.started_at ?? "") ? -1 : 1,
+      );
+    }
+    return ledgers;
   }
 
   /** Current workspace files (shared by all sessions), relative paths. */
@@ -197,12 +292,80 @@ export class RunManager {
     if (this.activeRunId !== null)
       throw new BusyError("masih ada run yang berjalan");
 
-    const runId = `run_${randomUUID().slice(0, 8)}`;
     // Only reuse a session id this server issued; anything else starts a new session.
     const sessionId =
       body.session_id && this.sessions.has(body.session_id)
         ? body.session_id
         : `s_${randomUUID().slice(0, 8)}`;
+    // Model router (Fase 7): reorder providers for this run. An explicit
+    // model (body.model) always beats the router; an unknown model name is
+    // ignored and the router decides instead.
+    const explicitModel =
+      body.model && this.cfg.providers.some((p) => p.model === body.model)
+        ? body.model
+        : undefined;
+    const { providers: ordered, route } = routeProviders(
+      this.cfg.providers,
+      body.message,
+      {
+        enabled: isRouterEnabled(this.cfg.BIKININ_ROUTER),
+        explicitModel,
+      },
+    );
+    const effort = body.effort ?? "sedang";
+    return this.beginRun(
+      sessionId,
+      body.message,
+      ordered[0],
+      effort,
+      route,
+      ordered,
+    );
+  }
+
+  /**
+   * Continues a run that ended with budget_exceeded, with a fresh step/cost
+   * budget (§8.4). The session history already holds the previous run's
+   * transcript, so the new run picks up where the old one stopped. The
+   * caller maps the error to HTTP: not-found → 404, the rest → 409.
+   */
+  resume(
+    runId: string,
+  ):
+    | { run_id: string; session_id: string }
+    | { error: "not-found" | "busy" | "not-resumable" } {
+    const old = this.runs.get(runId);
+    if (!old) return { error: "not-found" };
+    if (this.activeRunId !== null) return { error: "busy" };
+    const last = old.events.at(-1);
+    if (
+      !old.finished ||
+      last?.type !== "run_finished" ||
+      last.status !== "budget_exceeded"
+    )
+      return { error: "not-resumable" };
+    // Resume keeps the original run's provider and order: no re-routing
+    // mid-session, so a resumed run never silently switches models.
+    return this.beginRun(
+      old.sessionId,
+      old.message,
+      old.provider,
+      old.effort,
+      undefined,
+      old.providers,
+    );
+  }
+
+  /** Creates the record, wires emit/approve, and starts the agent. */
+  private beginRun(
+    sessionId: string,
+    message: string,
+    provider: ProviderConfig,
+    effort: "sedang" | "tinggi",
+    route?: RouteInfo,
+    providers: ProviderConfig[] = [provider],
+  ): { run_id: string; session_id: string } {
+    const runId = `run_${randomUUID().slice(0, 8)}`;
     if (!this.sessions.has(sessionId)) {
       this.sessions.set(sessionId, new SessionHistory());
       while (this.sessions.size > MAX_SESSIONS) {
@@ -213,11 +376,6 @@ export class RunManager {
         void deleteSession(this.opts.workspace, oldest).catch(() => {});
       }
     }
-    // Model must be on the server allowlist; anything else falls back to primary.
-    const provider =
-      this.cfg.providers.find((p) => p.model === body.model) ??
-      this.cfg.providers[0];
-    const effort = body.effort ?? "sedang";
     const m = this.meta.get(sessionId);
     if (m) {
       m.prompts += 1;
@@ -226,7 +384,7 @@ export class RunManager {
       m.runCount += 1;
     } else {
       this.meta.set(sessionId, {
-        title: body.message,
+        title: message,
         prompts: 1,
         updatedAt: Date.now(),
         runIds: [runId],
@@ -243,6 +401,10 @@ export class RunManager {
       abort: new AbortController(),
       pending: new Map(),
       log: createEventLog(this.opts.workspace, sessionId),
+      message,
+      provider,
+      providers,
+      effort,
     };
     this.runs.set(runId, rec);
     this.activeRunId = runId;
@@ -252,7 +414,18 @@ export class RunManager {
       // Fase 1: every event is also appended to the session .jsonl log,
       // so --continue and a later restart can replay the run.
       rec.log.append(e);
-      if (e.type === "run_finished") rec.finished = true;
+      if (e.type === "run_finished") {
+        rec.finished = true;
+        // Fase 7 ledger: persist the finished run's cost/time ledger
+        // (built from the events above, no extra LLM call). Fire-and-
+        // forget like persistSession: the run already finished.
+        const ledger = buildLedgerFromEvents(rec.events, runId);
+        if (ledger) {
+          void upsertLedger(this.opts.workspace, sessionId, ledger).catch(
+            () => {},
+          );
+        }
+      }
       for (const listener of rec.listeners) listener(e);
     });
     const approve = (req: ApprovalRequest) =>
@@ -260,10 +433,26 @@ export class RunManager {
         rec.pending.set(req.approvalId, resolve);
       });
 
+    // loop.ts owns the run_started event and this file must not edit it, so
+    // the route is attached here instead: the wrapper adds `route` to
+    // run_started only; every other event passes through untouched.
+    const rawEmit = emit as unknown as (
+      type: EventType,
+      data: Record<string, unknown>,
+    ) => AgentEvent;
+    const emitForLoop: EmitFn = ((
+      type: EventType,
+      data: Record<string, unknown>,
+    ) => {
+      if (type === "run_started" && route)
+        return rawEmit(type, { ...data, route });
+      return rawEmit(type, data);
+    }) as unknown as EmitFn;
+
     void this.execute(
       rec,
-      body.message,
-      emit,
+      message,
+      emitForLoop,
       approve,
       provider,
       effort,
@@ -292,12 +481,32 @@ export class RunManager {
     // the model sees what it learned in earlier sessions. A failed read
     // means no memory, never a failed run.
     const memoryBlock = await this.memoryContext(rec.sessionId).catch(() => "");
-    const systemPrompt = memoryBlock
-      ? `${this.opts.systemPrompt}\n\n${memoryBlock}`
-      : this.opts.systemPrompt;
+    // Fase 6: episodic lessons relevant to this request, same treatment.
+    const lessonsBlock = await this.lessonsContext(message).catch(() => "");
+    const systemPrompt = [this.opts.systemPrompt, memoryBlock, lessonsBlock]
+      .filter((b) => b.length > 0)
+      .join("\n\n");
+    // Fase 5: checkpoint workspace sebelum run dimulai (best-effort: gagal
+    // membuat checkpoint tidak menggagalkan run; loop mencatatnya sebagai
+    // event `checkpoint_created` atau `error` setelah `run_started`).
+    let checkpoint: AgentDeps["checkpoint"];
+    let checkpointError: string | undefined;
     try {
+      const cp = await createCheckpoint(
+        this.opts.workspace,
+        rec.sessionId,
+        rec.runId,
+      );
+      checkpoint = { id: cp.id, method: cp.method, files: cp.files.length };
+    } catch (err) {
+      checkpointError = err instanceof Error ? err.message : String(err);
+    }
+    try {
+      // Fase 6: one LLM instance for the run — the same fallback client
+      // also serves vision (inspect_image) through ToolContext.
+      const llm = this.opts.llm ?? createFallbackLlm(rec.providers);
       const result = await runAgent({
-        llm: this.opts.llm ?? createFallbackLlm(this.cfg.providers),
+        llm,
         model: provider.model,
         effort,
         systemPrompt,
@@ -313,6 +522,13 @@ export class RunManager {
         approve,
         signal: rec.abort.signal,
         history: history?.messages(),
+        checkpoint,
+        checkpointError,
+        // Vision is optional: a test double without describeImage leaves
+        // the tool to fail honestly ("vision belum tersedia").
+        ...(llm.describeImage
+          ? { describeImage: (req) => llm.describeImage!(req) }
+          : {}),
       });
       history?.add(result.transcript);
       const m = this.meta.get(rec.sessionId);
@@ -331,6 +547,7 @@ export class RunManager {
       // Trade-off, documented: the memory file may lag one run behind.
       void this.persistSession(rec.sessionId).catch(() => {});
       void this.updateMemory(result).catch(() => {});
+      void this.updateLessons(result).catch(() => {});
     } catch (err) {
       // runAgent normally always emits run_finished; this is a last-resort guard.
       const m = this.meta.get(rec.sessionId);
@@ -371,6 +588,16 @@ export class RunManager {
     return buildMemoryContext(entries, sessions, currentSessionId);
   }
 
+  /**
+   * The lessons block for the system prompt: past failures whose keywords
+   * overlap this request, so the model does not repeat them. Same
+   * fail-soft treatment as memoryContext.
+   */
+  private async lessonsContext(query: string): Promise<string> {
+    const lessons = await readLessonEntries(this.opts.workspace);
+    return buildLessonsContext(lessons, query);
+  }
+
   /** Writes one session's history + metadata to disk (atomic). */
   private async persistSession(sessionId: string): Promise<void> {
     const history = this.sessions.get(sessionId);
@@ -406,6 +633,21 @@ export class RunManager {
     await appendMemoryFacts(this.opts.workspace, facts);
   }
 
+  /**
+   * Rule-based episodic lesson update from a finished run. Cheap by design:
+   * no model call, only deterministic extraction of failure signals from
+   * the transcript. Writes nothing when the run taught nothing durable.
+   */
+  private async updateLessons(result: AgentResult): Promise<void> {
+    const lessons = extractLessons(
+      result.transcript,
+      result.summary,
+      result.status,
+    );
+    if (lessons.length === 0) return;
+    await appendLessons(this.opts.workspace, lessons);
+  }
+
   stop(runId: string): boolean {
     const rec = this.runs.get(runId);
     if (!rec) return false;
@@ -427,5 +669,38 @@ export class RunManager {
     rec.pending.delete(approvalId);
     resolve(decision === "allow");
     return true;
+  }
+
+  /**
+   * Fase 5: restore a checkpoint. Explicit user action only (the HTTP
+   * route requires a POST from the UI). The restore is recorded as a
+   * `checkpoint_restored` event in the checkpoint's session log.
+   */
+  async restoreCheckpoint(
+    id: string,
+  ): Promise<{
+    checkpoint_id: string;
+    files_restored: number;
+    method: "git" | "copy";
+  }> {
+    const meta = (await listCheckpoints(this.opts.workspace)).find(
+      (c) => c.id === id,
+    );
+    if (!meta) throw new Error(`checkpoint tidak ditemukan: ${id}`);
+    const { files_restored, method } = await restoreCheckpointOnDisk(
+      this.opts.workspace,
+      id,
+    );
+    const log = createEventLog(this.opts.workspace, meta.session_id);
+    const emit = createEmitter(`restore_${id.slice(0, 8)}`, (e) =>
+      log.append(e),
+    );
+    emit("checkpoint_restored", {
+      checkpoint_id: id,
+      method,
+      files_restored,
+    });
+    await log.flush();
+    return { checkpoint_id: id, files_restored, method };
   }
 }

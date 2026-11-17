@@ -9,10 +9,30 @@ const TIMEOUT_MS = 120_000;
 const MAX_BUFFER = 2 * 1024 * 1024;
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASS|CRED/i;
 
+// Variabel yang mengubah perilaku proses anak tanpa mengubah perintahnya:
+// loader (LD_PRELOAD dkk. = injeksi .so), Node (NODE_OPTIONS bisa
+// --require file arbitrer; NODE_PATH/NODE_EXTRA_CA_CERTS mengubah resolusi
+// modul dan trust TLS), git (GIT_DIR dkk. memindahkan repo/index/config),
+// shell (CDPATH mengubah arti cd; IFS mengubah word splitting;
+// ENV/BASH_ENV menjalankan file startup), dan NPM_CONFIG_* (registry dkk.).
+// HOME dan PATH sengaja TIDAK dibuang: keduanya berasal dari env server
+// operator (trust domain yang sama dengan proses server — anak proses tidak
+// bisa mengubah env server), dan npm/node butuh keduanya (PATH berisi lokasi
+// node, mis. nvm; HOME dipakai npm/git untuk cache/konfigurasi). Assignment
+// inline PATH=/HOME= di string perintah tetap diblokir classifier.
+const BLOCKED_ENV_NAME =
+  /^(LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH|NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_COMMON_DIR|GIT_CONFIG|GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_SSH|GIT_SSH_COMMAND|GIT_ASKPASS|GIT_EDITOR|GIT_PAGER|GIT_CEILING_DIRECTORIES|CDPATH|IFS|ENV|BASH_ENV)$/i;
+const BLOCKED_ENV_PREFIX = /^NPM_CONFIG_/i;
+
 /** Child processes never inherit secrets from the parent environment. */
 export function safeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(
-    Object.entries(env).filter(([name]) => !SECRET_NAME.test(name)),
+    Object.entries(env).filter(
+      ([name]) =>
+        !SECRET_NAME.test(name) &&
+        !BLOCKED_ENV_NAME.test(name) &&
+        !BLOCKED_ENV_PREFIX.test(name),
+    ),
   );
 }
 

@@ -76,8 +76,13 @@ const PROJECT_MARKERS = [".git", "package.json"];
  * The workspace must not sit inside a project. Otherwise tools like git or npm walk up
  * and act on the app's own repository.
  * - Every parent folder is checked for .git and package.json.
- * - The workspace itself may hold a package.json (the agent builds Node projects there),
- *   but not a .git, which would make the whole folder look like a repository.
+ * - The workspace itself may hold a package.json (the agent builds Node projects there).
+ * - The workspace itself may also hold a .git (Fase 6): the git tool and the
+ *   git checkpoint method need a repository in the session workspace, and
+ *   the git tool only ever runs `git -C <workspace>` with no push/network,
+ *   so it cannot reach outside the workspace. The parent checks above are
+ *   what keep the app's own repository out of reach — a workspace inside
+ *   another project is still rejected.
  * The message names the marker, never a full path.
  */
 export async function assertWorkspaceIsolated(
@@ -88,10 +93,6 @@ export async function assertWorkspaceIsolated(
       "path_blocked",
       `workspace ${where} (ditemukan ${marker}). Pakai folder di luar repo, misalnya ~/bikinin-workspace, lalu atur BIKININ_WORKSPACE.`,
     );
-
-  if (await pathExists(join(workspace, ".git"))) {
-    throw fail(".git", "berisi repositori git");
-  }
 
   let cur = dirname(workspace);
   for (;;) {

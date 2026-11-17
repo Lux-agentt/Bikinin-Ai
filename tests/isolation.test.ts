@@ -28,11 +28,11 @@ describe("assertWorkspaceIsolated", () => {
     await expect(assertWorkspaceIsolated(ws)).resolves.toBeUndefined();
   });
 
-  it("rejects a workspace that is itself a git repository", async () => {
+  it("accepts a workspace that is itself a git repository (Fase 6: the git tool needs one)", async () => {
     const base = await mkdtemp(join(tmpdir(), "bikinin-iso-"));
     const ws = join(base, "ws");
     await mkdir(join(ws, ".git"), { recursive: true });
-    await expect(assertWorkspaceIsolated(ws)).rejects.toThrow(".git");
+    await expect(assertWorkspaceIsolated(ws)).resolves.toBeUndefined();
   });
 
   it("rejects a workspace inside a git repository", async () => {

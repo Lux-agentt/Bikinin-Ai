@@ -12,10 +12,49 @@ const BLOCKED: Array<{ re: RegExp; reason: string }> = [
     re: /\brm\s+(-\S+\s+)*(\/|~|\$HOME|\$\{HOME\})(\s|\/\*|$)/,
     reason: "rm pada root atau home",
   },
-  { re: /(^|\s)\.\.(\/|\s|$)/, reason: "akses folder induk (..)" },
-  { re: /(^|[\s>|])\/(?!dev\/null)/, reason: "path absolut di luar workspace" },
-  { re: /(^|[\s>|])~/, reason: "path home (~) tidak diizinkan" },
+  {
+    // rm yang targetnya isi workspace sendiri (., ./, *, ./*, termasuk
+    // sebagai target kedua). Sebelumnya hanya "confirm" — di --yolo jalan
+    // tanpa bertanya dan menghapus isi workspace termasuk log sesi.
+    // Target bernama (mis. node_modules) tetap "confirm", bukan block.
+    re: /\brm\b[^;&|]*[\s](\.|\*|\.\/|\.\/\*)([\s;&|]|$)/,
+    reason: "rm menghapus isi workspace (., ./, *)",
+  },
+  {
+    // ".." sebagai segmen path di mana saja: diawali / . " ' ; | & < > =
+    // dsb. (bukan hanya awal-string/spasi) dan diikuti / ; | & spasi, kutip,
+    // atau akhir string. "a..b" dan "..hidden" bukan traversal karena ".."
+    // menempel huruf — tidak tertangkap.
+    re: /(^|[^A-Za-z0-9_.-])\.\.([^A-Za-z0-9_.-]|$)/,
+    reason: "akses folder induk (..)",
+  },
+  {
+    // "/" absolut dikenali juga sesudah kutip, <, =, (, koma, ;, &.
+    // Pengecualian /dev/null diperketat: /dev/nullx tetap diblokir.
+    // ":" sengaja bukan awalan — URL https://... tetap lolos ke confirm.
+    re: /(^|[\s>|"'=<\(,;&])\/(?!dev\/null(?=$|[\s"'\/;&|]))/,
+    reason: "path absolut di luar workspace",
+  },
+  {
+    re: /(^|[\s>|"'=<\(])~/,
+    reason: "path home (~) tidak diizinkan",
+  },
   { re: /\$HOME|\$\{HOME\}/, reason: "referensi $HOME tidak diizinkan" },
+  {
+    // $VAR kosong -> "/...", ${IFS} -> spasi -> "/...", dan ${X:-/...}.
+    // Di shell baru tiap run_command, $VAR hanya bisa kosong atau berasal
+    // dari env server — jadi $VAR/... praktis selalu jadi path absolut.
+    re: /\$[A-Za-z_][A-Za-z0-9_]*(?=\/)|\$\{[A-Za-z_][A-Za-z0-9_]*\}(?=\/)|\$\{[^}]*\//,
+    reason: "ekspansi variabel menjadi path ($VAR/...) tidak diizinkan",
+  },
+  {
+    // Assignment inline di string perintah melewati safeEnv (yang hanya
+    // membersihkan env warisan): VAR=nilai cmd, atau export VAR=nilai.
+    // PATH dan HOME sengaja ikut di sini (bukan di safeEnv): yang diwariskan
+    // dari env server operator boleh, yang ditulis model di perintah tidak.
+    re: /(^|[;&|\s])(LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_INSERT_LIBRARIES|DYLD_LIBRARY_PATH|NODE_OPTIONS|NODE_PATH|NODE_EXTRA_CA_CERTS|GIT_DIR|GIT_WORK_TREE|GIT_INDEX_FILE|GIT_OBJECT_DIRECTORY|GIT_ALTERNATE_OBJECT_DIRECTORIES|GIT_COMMON_DIR|GIT_CONFIG|GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS|GIT_CONFIG_GLOBAL|GIT_CONFIG_SYSTEM|GIT_SSH|GIT_SSH_COMMAND|GIT_ASKPASS|GIT_EDITOR|GIT_PAGER|GIT_CEILING_DIRECTORIES|CDPATH|IFS|ENV|BASH_ENV|PATH|HOME|NPM_CONFIG_[A-Z0-9_]+)=/,
+    reason: "assignment variabel pengubah perilaku di perintah",
+  },
   { re: /\bsudo\b/, reason: "sudo tidak diizinkan" },
   {
     // Perintah jalan via /bin/sh -c, jadi substitusi perintah mengeksekusi

@@ -7,12 +7,22 @@ import { randomUUID } from "node:crypto";
 import { mkdir, realpath } from "node:fs/promises";
 import { assertWorkspaceIsolated } from "./safety/paths.js";
 import { createInterface } from "node:readline/promises";
-import { runAgent } from "./agent/loop.js";
+import { runAgent, type EmitFn } from "./agent/loop.js";
 import { loadConfig } from "./config.js";
-import { createEmitter, toNDJSON, type AgentEvent } from "./events.js";
+import {
+  createEmitter,
+  toNDJSON,
+  type AgentEvent,
+  type EventType,
+} from "./events.js";
 import { createFallbackLlm } from "./llm/fallback.js";
+import { isRouterEnabled, routeProviders } from "./llm/router.js";
 import { loadSystemPrompt } from "./prompt.js";
-import { formatSkillList, listSkills, REPO_SKILLS_DIR } from "./skills/loader.js";
+import {
+  formatSkillList,
+  listSkills,
+  REPO_SKILLS_DIR,
+} from "./skills/loader.js";
 import { parseCliArgs } from "./cli-args.js";
 import { makeApprover } from "./approve.js";
 import { SessionHistory, MAX_SESSIONS } from "./agent/history.js";
@@ -95,9 +105,7 @@ async function main(): Promise<number> {
       : persisted[0]; // loadSessions returns newest first
     const targetId = args.continueSessionId ?? target?.session_id;
     if (!targetId || !SESSION_ID_RE.test(targetId)) {
-      process.stderr.write(
-        "Tidak ada sesi sebelumnya untuk dilanjutkan.\n",
-      );
+      process.stderr.write("Tidak ada sesi sebelumnya untuk dilanjutkan.\n");
       return 2;
     }
     const events = await readSessionEvents(workspace, targetId);
@@ -147,10 +155,33 @@ async function main(): Promise<number> {
     );
   }
 
-  const primary = cfg.providers[0];
+  // Model router (Fase 7): reorder providers for this run. The CLI has no
+  // --model flag, so there is no explicit model to override the router here.
+  const { providers: ordered, route } = routeProviders(
+    cfg.providers,
+    args.message,
+    { enabled: isRouterEnabled(cfg.BIKININ_ROUTER) },
+  );
+  // loop.ts owns the run_started event; attach the route here instead (see
+  // the same wrapper in server/runs.ts).
+  const rawEmit = emit as unknown as (
+    type: EventType,
+    data: Record<string, unknown>,
+  ) => AgentEvent;
+  const emitForLoop: EmitFn = ((
+    type: EventType,
+    data: Record<string, unknown>,
+  ) => {
+    if (type === "run_started") return rawEmit(type, { ...data, route });
+    return rawEmit(type, data);
+  }) as unknown as EmitFn;
+
+  const primary = ordered[0];
+  // Fase 6: the CLI's fallback client also serves vision (inspect_image).
+  const cliLlm = createFallbackLlm(ordered);
   try {
     const result = await runAgent({
-      llm: createFallbackLlm(cfg.providers),
+      llm: cliLlm,
       model: primary.model,
       systemPrompt: await loadSystemPrompt(
         formatSkillList(await listSkills(REPO_SKILLS_DIR)),
@@ -163,7 +194,7 @@ async function main(): Promise<number> {
         maxCostUsd: cfg.BIKININ_MAX_COST_USD,
       },
       prices: { inPerM: primary.inPerM, outPerM: primary.outPerM },
-      emit,
+      emit: emitForLoop,
       approve: makeApprover(args.yolo, async (req) => {
         if (!rl) return false; // non-interactive: never approve
         const answer = await rl.question(
@@ -173,6 +204,7 @@ async function main(): Promise<number> {
       }),
       signal: controller.signal,
       history: history.messages(),
+      describeImage: (req) => cliLlm.describeImage(req),
     });
     // Durability: the run joins the session history on disk, so a later
     // --continue (or a server restart) picks it up.

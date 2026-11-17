@@ -1,5 +1,6 @@
 // Tool contract: zod validates args, errors go back to the model as results (never crash the loop).
 import type { z } from "zod";
+import type { VisionRequest, VisionResult } from "../llm/client.js";
 import { ToolName as ToolNameSchema } from "../events.js";
 import type { Verdict } from "../safety/commands.js";
 
@@ -22,6 +23,8 @@ export interface FileChange {
   path: string; // relative to workspace
   op: "created" | "modified" | "deleted";
   bytes: number;
+  /** Unified diff of the change (loop-filled, truncated ~2000 chars). */
+  diff?: string;
 }
 
 export interface ToolResult {
@@ -29,10 +32,37 @@ export interface ToolResult {
   summary: string;
   output: string;
   changes: FileChange[];
+  /** Token usage of a tool's own model call (vision via inspect_image).
+   *  The loop adds it to the run totals and emits a `usage` event. */
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cached_tokens: number;
+  };
 }
 
 export interface ToolContext {
   workspace: string; // absolute, realpath
+  /** Subagent runner (Fase 5). Only the `delegate` tool uses it; absent in runs without one. */
+  delegate?: (
+    task: string,
+    context?: string,
+  ) => Promise<{
+    summary: string;
+    status: string;
+    steps: number;
+    costUsd: number;
+    usage: {
+      input_tokens: number;
+      output_tokens: number;
+      cached_tokens: number;
+    };
+  }>;
+  /**
+   * Vision, wired by the loop from the fallback LLM client. A tool must never
+   * build its own LLM client. Absent when the run has no vision wired in.
+   */
+  describeImage?: (req: VisionRequest) => Promise<VisionResult>;
 }
 
 export interface ToolSpec<S extends z.ZodTypeAny> {

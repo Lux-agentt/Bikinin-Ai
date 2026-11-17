@@ -1,13 +1,28 @@
 // Agent loop: model call -> tool calls -> results back to model, until done or a budget stops it.
 // Every observable step goes through emit(); this file never prints.
 import { randomUUID } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { AgentEvent, createEmitter } from "../events.js";
 import { AgentError, type ErrorCode } from "../errors.js";
-import type { ChatResult, LlmClient, ToolCallReq } from "../llm/client.js";
+import type {
+  ChatResult,
+  LlmClient,
+  ToolCallReq,
+  VisionRequest,
+  VisionResult,
+} from "../llm/client.js";
 import { costUsd, type Prices } from "../llm/pricing.js";
 import { Budget } from "../safety/budget.js";
-import { getTool, TOOLS, toolSpecsForLlm } from "../tools/registry.js";
+import { resolveInWorkspace } from "../safety/paths.js";
+import { TOOLS, toolSpecsForLlm } from "../tools/registry.js";
+import { createDelegateRunner, type DelegateResult } from "./subagent.js";
+import { unifiedDiff } from "./diff.js";
+import {
+  formatSelfCheckFeedback,
+  runSelfCheck,
+  SELF_CHECK_MAX_FIX_ROUNDS,
+} from "./self-check.js";
 import {
   truncate,
   type ParsedOk,
@@ -43,6 +58,18 @@ export interface AgentDeps {
   signal?: AbortSignal;
   /** Earlier messages of this session (after the system prompt), replayed before the new message. */
   history?: ChatCompletionMessageParam[];
+  /** Tools this run may call. Default: all of TOOLS. Subagents pass a read-only subset. */
+  tools?: RegisteredTool[];
+  /** True for subagent runs: skips the plan-first nudge (a subagent has
+   *  one focused task, not a plan). */
+  isSubagent?: boolean; /** Checkpoint made before this run (Fase 5, server only). Emitted as
+   *  `checkpoint_created` right after `run_started`. */
+  checkpoint?: { id: string; method: "git" | "copy"; files: number };
+  /** Why the checkpoint could not be made (emitted as an `error` event instead). */
+  checkpointError?: string;
+  /** Vision, wired from the fallback LLM (Fase 6). Passed to tools as
+   *  ToolContext.describeImage; absent when the run has no vision. */
+  describeImage?: (req: VisionRequest) => Promise<VisionResult>;
 }
 
 export interface AgentResult {
@@ -59,6 +86,10 @@ export interface AgentResult {
 interface ToolOutput {
   id: string;
   content: string;
+  /** True when the call failed (blocked, denied, threw, or ok:false). Used for the retry budget. */
+  failed: boolean;
+  /** Tool name + raw args: identical retries of the same call share a key. */
+  key: string;
 }
 
 interface Job {
@@ -70,6 +101,39 @@ interface Job {
 }
 
 const PREVIEW_LIMIT = 2000;
+const RETRY_BUDGET = 3; // same failing call 3x in a row -> stop and ask the user
+const MAX_LOOP_CHARS = 100_000; // within-run context cap; older tool outputs collapse past it
+
+function messageChars(m: ChatCompletionMessageParam): number {
+  let n = 0;
+  const c = m.content;
+  if (typeof c === "string") n += c.length;
+  else if (Array.isArray(c))
+    for (const p of c) if (p.type === "text") n += p.text.length;
+  if (m.role === "assistant" && m.tool_calls)
+    for (const tc of m.tool_calls)
+      if (tc.type === "function") n += tc.function.arguments.length;
+  return n;
+}
+
+/** Collapse older tool outputs (keeps the newest 4 intact) once the run's
+ *  context passes MAX_LOOP_CHARS. Never touches user/system messages or
+ *  assistant messages with tool_calls, so the conversation stays valid. */
+function compactContext(messages: ChatCompletionMessageParam[]): void {
+  let total = 0;
+  for (const m of messages) total += messageChars(m);
+  if (total <= MAX_LOOP_CHARS) return;
+  let kept = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== "tool") continue;
+    kept += 1;
+    if (kept <= 4) continue;
+    if (typeof m.content === "string" && m.content.length > 200) {
+      m.content = `${m.content.slice(0, 200)}\n…[hasil tool dipotong untuk hemat konteks]`;
+    }
+  }
+}
 
 function parseArgs(raw: string): unknown {
   try {
@@ -119,6 +183,90 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
     }
   };
 
+  // --- Fase 5: plan-first, retry budget, read cache, subagent. ---
+  const availableTools = d.tools ?? TOOLS;
+  const findTool = (name: string): RegisteredTool | undefined =>
+    availableTools.find((t) => t.name === name);
+  let planSet = false;
+  let planNudged = false;
+  let nextPlanId = 1;
+  const currentPlan: Array<{
+    id: string;
+    text: string;
+    status: "pending" | "doing" | "done";
+  }> = [];
+  // read_file cache: relative path -> mtime+size at read time + step.
+  const readCache = new Map<
+    string,
+    { mtimeMs: number; size: number; step: number }
+  >();
+  let lastFailKey = "";
+  let failStreak = 0;
+
+  // --- Fase 6: plan mode + self-check state. ---
+  // Plan mode is opt-in: the model calls request_plan_approval after
+  // update_plan. From that moment, file-changing tools are held until the
+  // user allows the plan; on deny the run stops without changing files.
+  // "not_requested" means normal mode — mutating tools run as usual.
+  let planApproval: "not_requested" | "pending" | "approved" | "denied" =
+    "not_requested";
+  let planDenied = false;
+  let selfCheckRounds = 0;
+
+  /** True when this job would change files (or run outside code). */
+  const isMutatingJob = (j: Job): boolean => {
+    switch (j.tool.name) {
+      case "write_file":
+      case "edit_file":
+      case "run_command":
+      case "render_video":
+      case "mcp_call":
+        return true;
+      case "git": {
+        const op = (j.parsed.publicArgs as { op?: unknown }).op;
+        return op === "commit" || op === "branch";
+      }
+      default:
+        return false;
+    }
+  };
+
+  /** File content before a write/edit, for the file_changed diff. */
+  const readBefore = async (rel: string): Promise<string> => {
+    try {
+      const { abs } = await resolveInWorkspace(d.workspace, rel);
+      return await readFile(abs, "utf8");
+    } catch {
+      return ""; // new file (or unreadable): diff shows all lines added
+    }
+  };
+
+  const delegateRunner = createDelegateRunner({
+    llm: d.llm,
+    model: d.model,
+    prices: d.prices,
+    workspace: d.workspace,
+    signal: d.signal,
+    emit,
+    runAgentImpl: runAgent,
+    charge: (r: DelegateResult) => {
+      budget.steps += r.steps;
+      budget.addCost(r.costUsd);
+      tokens.input += r.usage.input_tokens;
+      tokens.output += r.usage.output_tokens;
+      tokens.cached += r.usage.cached_tokens;
+      emit("usage", {
+        step: budget.steps,
+        input_tokens: r.usage.input_tokens,
+        output_tokens: r.usage.output_tokens,
+        cached_tokens: r.usage.cached_tokens,
+        cost_usd: r.costUsd,
+        totals: totals(),
+      });
+      flushAlerts();
+    },
+  });
+
   const finish = (status: RunStatus, summary: string): AgentResult => {
     const durationMs = Date.now() - startedAt;
     const t = totals();
@@ -160,6 +308,77 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
   const runJob = async (job: Job): Promise<ToolOutput> => {
     const { call, callId, tool, parsed, startedMs } = job;
     const verdict = parsed.gate;
+    const key = `${tool.name}:${call.function.arguments}`;
+    const argPath = (parsed.publicArgs as { path?: unknown }).path;
+
+    // Fase 6, plan mode: request_plan_approval asks the user through the
+    // existing approval dialog. Until the plan is approved, every
+    // file-changing tool is held; on deny the run stops (see runToolCalls).
+    if (tool.name === "request_plan_approval") {
+      const plan = parsed.publicArgs as {
+        summary?: unknown;
+        files?: unknown;
+      };
+      const summary =
+        typeof plan.summary === "string" ? plan.summary : "rencana kerja";
+      const files = Array.isArray(plan.files)
+        ? (plan.files.filter((f) => typeof f === "string") as string[])
+        : [];
+      planApproval = "pending";
+      const approvalId = randomUUID().slice(0, 8);
+      emit("approval_requested", {
+        approval_id: approvalId,
+        call_id: callId,
+        tool: tool.name,
+        reason: `Setujui rencana ini sebelum file diubah? ${summary}${files.length > 0 ? ` File: ${files.join(", ")}` : ""}`,
+        risk: "medium",
+      });
+      const approved = await d.approve({
+        approvalId,
+        command: "",
+        reason: summary,
+        risk: "medium",
+      });
+      emit("approval_resolved", {
+        approval_id: approvalId,
+        decision: approved ? "allow" : "deny",
+        by: "user",
+      });
+      planApproval = approved ? "approved" : "denied";
+      if (!approved) planDenied = true;
+      emitFinished(
+        callId,
+        approved,
+        approved ? "rencana disetujui" : "rencana ditolak pengguna",
+        approved ? summary : "",
+        startedMs,
+      );
+      return {
+        id: call.id,
+        content: approved
+          ? `OK: rencana disetujui — lanjut kerjakan sesuai rencana.`
+          : `ERROR: pengguna menolak rencana. Berhenti tanpa mengubah file.`,
+        failed: !approved,
+        key,
+      };
+    }
+
+    if (
+      (planApproval === "pending" || planApproval === "denied") &&
+      isMutatingJob(job)
+    ) {
+      const why =
+        planApproval === "denied"
+          ? "rencana ditolak pengguna"
+          : "rencana belum disetujui";
+      emitFinished(callId, false, `ditahan: ${why}`, "", startedMs);
+      return {
+        id: call.id,
+        content: `ERROR: ${why} — tool pengubah file ditahan sampai rencana disetujui lewat request_plan_approval.`,
+        failed: true,
+        key,
+      };
+    }
 
     if (verdict.decision === "block") {
       emit("error", {
@@ -172,6 +391,8 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
       return {
         id: call.id,
         content: `ERROR: diblokir kebijakan keamanan: ${verdict.reason}`,
+        failed: true,
+        key,
       };
     }
 
@@ -202,21 +423,156 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
           id: call.id,
           content:
             "ERROR: pengguna menolak perintah ini. Cari cara lain atau tanyakan pengguna.",
+          failed: true,
+          key,
         };
       }
     }
 
+    // Fase 5: jangan baca ulang file yang tidak berubah di run yang sama.
+    // Isinya sudah ada di riwayat percakapan, jadi kembalikan catatan singkat
+    // (hemat token) alih-alih isi file yang sama untuk kedua kalinya.
+    if (tool.name === "read_file" && typeof argPath === "string") {
+      try {
+        const { abs, rel } = await resolveInWorkspace(d.workspace, argPath);
+        const st = await stat(abs);
+        const hit = readCache.get(rel);
+        if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+          emitFinished(
+            callId,
+            true,
+            `dari cache (tidak berubah sejak langkah ${hit.step})`,
+            "",
+            startedMs,
+          );
+          return {
+            id: call.id,
+            content: `OK (cache): ${rel} tidak berubah sejak dibaca di langkah ${hit.step} — isinya sudah ada di riwayat percakapan di atas, pakai itu.`,
+            failed: false,
+            key,
+          };
+        }
+      } catch {
+        // stat/resolve gagal (mis. file dihapus): biarkan eksekusi normal
+        // yang menangani errornya dengan pesan yang jelas.
+      }
+    }
+
+    // Fase 6: capture the old content before a write/edit, so the
+    // file_changed event can carry a unified diff.
+    const beforeContent =
+      (tool.name === "write_file" || tool.name === "edit_file") &&
+      typeof argPath === "string"
+        ? await readBefore(argPath)
+        : null;
+
     try {
-      const res: ToolResult = await parsed.execute({ workspace: d.workspace });
+      const res: ToolResult = await parsed.execute({
+        workspace: d.workspace,
+        delegate: delegateRunner,
+        describeImage: d.describeImage,
+      });
       for (const c of res.changes) {
-        emit("file_changed", { path: c.path, op: c.op, bytes: c.bytes });
+        // Fase 6: diff review — fill the optional diff field for files the
+        // run created or modified (deleted files have no new content).
+        let diff: string | undefined;
+        if (
+          beforeContent !== null &&
+          (c.op === "created" || c.op === "modified")
+        ) {
+          try {
+            const { abs } = await resolveInWorkspace(d.workspace, c.path);
+            const after = await readFile(abs, "utf8");
+            diff = unifiedDiff(beforeContent, after, c.path) || undefined;
+          } catch {
+            diff = undefined; // binary/unreadable: event still carries path+bytes
+          }
+        }
+        emit("file_changed", {
+          path: c.path,
+          op: c.op,
+          bytes: c.bytes,
+          ...(diff ? { diff } : {}),
+        });
         (c.op === "created" ? created : changed).add(c.path);
       }
+      // Fase 6: vision usage (inspect_image) joins the run totals and gets
+      // its own usage event, priced at the run's model prices. When the
+      // provider reports no usage, nothing is charged.
+      if (res.usage) {
+        const vCost = costUsd(res.usage, d.prices);
+        tokens.input += res.usage.input_tokens;
+        tokens.output += res.usage.output_tokens;
+        tokens.cached += res.usage.cached_tokens;
+        budget.addCost(vCost);
+        emit("usage", {
+          step: budget.steps,
+          input_tokens: res.usage.input_tokens,
+          output_tokens: res.usage.output_tokens,
+          cached_tokens: res.usage.cached_tokens,
+          cost_usd: vCost,
+          totals: totals(),
+        });
+        flushAlerts();
+      }
       const output = sanitize(res.output);
+      // Fase 5: perbarui read cache dari hasil eksekusi.
+      if (typeof argPath === "string") {
+        if (tool.name === "read_file" && res.ok) {
+          try {
+            const { abs, rel } = await resolveInWorkspace(d.workspace, argPath);
+            const st = await stat(abs);
+            readCache.set(rel, {
+              mtimeMs: st.mtimeMs,
+              size: st.size,
+              step: budget.steps,
+            });
+          } catch {
+            // abaikan: cache hanya optimasi
+          }
+        } else if (tool.name === "write_file" || tool.name === "edit_file") {
+          try {
+            const { rel } = await resolveInWorkspace(d.workspace, argPath);
+            readCache.delete(rel);
+          } catch {
+            // abaikan
+          }
+        }
+      }
+      if (tool.name === "run_command" && res.ok) readCache.clear();
+      // Fase 5: update_plan yang berhasil -> event plan_updated untuk panel Todo.
+      if (tool.name === "update_plan" && res.ok) {
+        const items =
+          (
+            parsed.publicArgs as {
+              items?: Array<{
+                text: string;
+                status: "pending" | "doing" | "done";
+              }>;
+            }
+          ).items ?? [];
+        for (const item of items) {
+          const norm = item.text.trim().toLowerCase();
+          const existing = currentPlan.find(
+            (p) => p.text.trim().toLowerCase() === norm,
+          );
+          if (existing) existing.status = item.status;
+          else
+            currentPlan.push({
+              id: `p${nextPlanId++}`,
+              text: item.text.trim(),
+              status: item.status,
+            });
+        }
+        planSet = true;
+        emit("plan_updated", { items: [...currentPlan] });
+      }
       emitFinished(callId, res.ok, res.summary, output, startedMs);
       return {
         id: call.id,
         content: `${res.ok ? "OK" : "GAGAL"}: ${res.summary}\n${truncate(output).text}`,
+        failed: !res.ok,
+        key,
       };
     } catch (err) {
       const { code, message: raw } = errorInfo(err);
@@ -225,16 +581,18 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         emit("error", { code, message, retryable: true, call_id: callId });
       }
       emitFinished(callId, false, message, "", startedMs);
-      return { id: call.id, content: `ERROR: ${message}` };
+      return { id: call.id, content: `ERROR: ${message}`, failed: true, key };
     }
   };
 
-  const runToolCalls = async (calls: ToolCallReq[]): Promise<ToolOutput[]> => {
+  const runToolCalls = async (
+    calls: ToolCallReq[],
+  ): Promise<{ outputs: ToolOutput[]; stopReason: string | null }> => {
     const results = new Map<string, ToolOutput>();
     const jobs: Job[] = [];
 
     for (const call of calls) {
-      const tool = getTool(call.function.name);
+      const tool = findTool(call.function.name);
       if (!tool) {
         emit("error", {
           code: "invalid_tool_args",
@@ -243,7 +601,9 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         });
         results.set(call.id, {
           id: call.id,
-          content: `ERROR: tool "${call.function.name}" tidak tersedia. Pilih dari: ${TOOLS.map((t) => t.name).join(", ")}`,
+          content: `ERROR: tool "${call.function.name}" tidak tersedia. Pilih dari: ${availableTools.map((t) => t.name).join(", ")}`,
+          failed: true,
+          key: `${call.function.name}:${call.function.arguments}`,
         });
         continue;
       }
@@ -277,6 +637,8 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         results.set(call.id, {
           id: call.id,
           content: `ERROR: argumen tidak valid: ${parsed.error}`,
+          failed: true,
+          key: `${tool.name}:${call.function.arguments}`,
         });
         continue;
       }
@@ -291,17 +653,59 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
       jobs.push({ call, callId, tool, parsed, startedMs });
     }
 
+    // Fase 6, plan mode: a request_plan_approval in this batch is decided
+    // FIRST, whatever its position in the model's call list — a write_file
+    // sent in the same turn must not run before the plan is approved.
+    // (tool_call_started events above keep the model's original order.)
+    const planFirst = jobs.filter(
+      (j) => j.tool.name === "request_plan_approval",
+    );
+    const rest = jobs.filter((j) => j.tool.name !== "request_plan_approval");
+    const orderedJobs = [...planFirst, ...rest];
+
     // Read-only tools run in parallel; anything that mutates runs in order.
     if (jobs.every((j) => j.tool.readOnly)) {
-      const outs = await Promise.all(jobs.map(runJob));
+      const outs = await Promise.all(orderedJobs.map(runJob));
       for (const o of outs) results.set(o.id, o);
     } else {
-      for (const job of jobs) results.set(job.call.id, await runJob(job));
+      for (const job of orderedJobs)
+        results.set(job.call.id, await runJob(job));
     }
 
-    return calls.map(
-      (c) => results.get(c.id) ?? { id: c.id, content: "ERROR: internal" },
+    const outputs = calls.map(
+      (c) =>
+        results.get(c.id) ?? {
+          id: c.id,
+          content: "ERROR: internal",
+          failed: true,
+          key: `${c.function.name}:${c.function.arguments}`,
+        },
     );
+
+    // Fase 5: retry budget — panggilan yang sama gagal 3x berturut-turut
+    // dengan cara yang sama berarti agent muter. Berhenti dan tanya pengguna.
+    let stopReason: string | null = null;
+    for (const o of outputs) {
+      if (o.failed) {
+        if (o.key === lastFailKey) failStreak += 1;
+        else {
+          lastFailKey = o.key;
+          failStreak = 1;
+        }
+        if (failStreak >= RETRY_BUDGET) {
+          const firstLine = o.content.split("\n")[0].slice(0, 200);
+          stopReason =
+            `Berhenti: panggilan yang sama gagal ${RETRY_BUDGET}x berturut-turut ` +
+            `(${o.key.split(":")[0]}). ${firstLine} ` +
+            "Tanyakan pengguna sebelum mencoba lagi — jangan ulangi cara yang sama.";
+          break;
+        }
+      } else {
+        lastFailKey = "";
+        failStreak = 0;
+      }
+    }
+    return { outputs, stopReason };
   };
 
   emit("run_started", {
@@ -312,6 +716,21 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
     limits: { max_steps: d.limits.maxSteps, max_cost_usd: d.limits.maxCostUsd },
   });
 
+  // Fase 5: checkpoint event comes right after run_started, never before it.
+  if (d.checkpoint) {
+    emit("checkpoint_created", {
+      checkpoint_id: d.checkpoint.id,
+      method: d.checkpoint.method,
+      files: d.checkpoint.files,
+    });
+  } else if (d.checkpointError) {
+    emit("error", {
+      code: "internal",
+      message: `Checkpoint gagal dibuat: ${d.checkpointError}`,
+      retryable: false,
+    });
+  }
+
   const prior = d.history ?? [];
   const priorCount = prior.length;
   const messages: ChatCompletionMessageParam[] = [
@@ -319,7 +738,7 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
     ...prior,
     { role: "user", content: d.message },
   ];
-  const tools = toolSpecsForLlm();
+  const tools = toolSpecsForLlm(availableTools);
 
   try {
     for (;;) {
@@ -371,6 +790,48 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         // Keep the final answer in the transcript so the next run remembers it.
         if (res.text.trim())
           messages.push({ role: "assistant", content: res.text });
+        // Fase 6: self-check — verify the result as code before declaring
+        // the run finished. Skipped for subagents (read-only research).
+        // A failure sends the findings back to the model for at most
+        // SELF_CHECK_MAX_FIX_ROUNDS fix rounds; a run out of budget ends
+        // budget_exceeded instead of looping forever.
+        if (!d.isSubagent && selfCheckRounds <= SELF_CHECK_MAX_FIX_ROUNDS) {
+          const verification = await runSelfCheck({
+            workspace: d.workspace,
+            files: [...created, ...changed],
+            finalText: res.text,
+          });
+          emit("verification", {
+            outcome: verification.outcome,
+            checks: verification.checks,
+            fixes: selfCheckRounds,
+          });
+          if (verification.outcome === "fail") {
+            if (selfCheckRounds >= SELF_CHECK_MAX_FIX_ROUNDS) {
+              const failed = verification.checks
+                .filter((c) => !c.ok)
+                .map((c) => `${c.name}: ${c.detail}`)
+                .join("; ");
+              return finish(
+                "completed",
+                `${res.text.trim() || "Selesai."}\n\nCatatan: verifikasi sendiri masih menemukan masalah setelah ${SELF_CHECK_MAX_FIX_ROUNDS} putaran perbaikan — ${failed}`,
+              );
+            }
+            if (budget.costExceeded() || budget.stepsExceeded()) {
+              flushAlerts();
+              return finish(
+                "budget_exceeded",
+                "Batas tercapai saat verifikasi menemukan masalah yang belum diperbaiki.",
+              );
+            }
+            selfCheckRounds += 1;
+            messages.push({
+              role: "user",
+              content: formatSelfCheckFeedback(verification, selfCheckRounds),
+            });
+            continue;
+          }
+        }
         return finish("completed", res.text.trim() || "Selesai.");
       }
       if (budget.costExceeded()) {
@@ -386,16 +847,50 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         );
       }
 
+      // Fase 5: plan-first — sebelum tool pertama, model harus menulis
+      // rencana singkat via update_plan. Diingatkan sekali; kalau tetap
+      // tidak membuat rencana, lanjutkan saja (jangan muter tanpa henti).
+      const hasPlanCall = res.toolCalls.some(
+        (c) => c.function.name === "update_plan",
+      );
+      if (!planSet && !planNudged && !hasPlanCall && !d.isSubagent) {
+        planNudged = true;
+        messages.push({
+          role: "system",
+          content:
+            "Sebelum tool lain: panggil update_plan dengan rencana singkat (maks 5 langkah) untuk tugas ini, lalu kerjakan mengikuti rencana itu. Jangan jalankan tool lain sebelum rencana dibuat.",
+        });
+        continue;
+      }
+
       messages.push({
         role: "assistant",
         content: res.text || null,
         tool_calls: res.toolCalls,
       });
-      const outputs = await runToolCalls(res.toolCalls);
+      const { outputs, stopReason } = await runToolCalls(res.toolCalls);
       for (const o of outputs) {
         messages.push({ role: "tool", tool_call_id: o.id, content: o.content });
       }
+      // Fase 5: compaction ekstraktif di dalam run (tanpa model baru).
+      compactContext(messages);
       flushAlerts();
+      // Fase 6, plan mode: the user denied the plan — stop without
+      // changing files (mutating tools in this batch were already held).
+      if (planDenied) {
+        return finish(
+          "stopped",
+          "Rencana ditolak pengguna — run berhenti tanpa mengubah file.",
+        );
+      }
+      if (stopReason) {
+        emit("error", {
+          code: "tool_failed",
+          message: stopReason,
+          retryable: false,
+        });
+        return finish("error", stopReason);
+      }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

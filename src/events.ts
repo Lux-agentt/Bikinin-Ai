@@ -23,6 +23,13 @@ export const ToolName = z.enum([
   "read_skill",
   "preview",
   "render_video",
+  "web_search",
+  "update_plan",
+  "delegate",
+  "inspect_image",
+  "git",
+  "mcp_call",
+  "request_plan_approval",
 ]);
 
 export const Totals = z.object({
@@ -40,6 +47,17 @@ export const RunStatus = z.enum([
   "budget_exceeded", // cost or step limit hit; resumable
 ]);
 
+/* ---------- model router decision (Fase 7, Track C) ---------- */
+
+/** Which model the router picked first for this run, and why. Optional so
+ *  old logs and runs without routing (e.g. resume) still validate. */
+export const RouteInfo = z.object({
+  category: z.enum(["coding", "reasoning", "light", "general"]),
+  reason: z.string(),
+  preferred_model: z.string(),
+});
+export type RouteInfo = z.infer<typeof RouteInfo>;
+
 /* ---------- events ---------- */
 
 export const RunStarted = Base.extend({
@@ -49,6 +67,7 @@ export const RunStarted = Base.extend({
   effort: z.enum(["sedang", "tinggi"]),
   user_message: z.string(),
   limits: z.object({ max_steps: z.number().int(), max_cost_usd: z.number() }),
+  route: RouteInfo.optional(),
 });
 
 export const TextDelta = Base.extend({
@@ -160,6 +179,51 @@ export const ErrorEvent = Base.extend({
   call_id: z.string().optional(),
 });
 
+export const CheckpointCreated = Base.extend({
+  type: z.literal("checkpoint_created"),
+  checkpoint_id: z.string(),
+  method: z.enum(["git", "copy"]),
+  files: z.number().int().nonnegative(),
+});
+
+export const CheckpointRestored = Base.extend({
+  type: z.literal("checkpoint_restored"),
+  checkpoint_id: z.string(),
+  method: z.enum(["git", "copy"]),
+  files_restored: z.number().int().nonnegative(),
+});
+
+export const SubagentStarted = Base.extend({
+  type: z.literal("subagent_started"),
+  task: z.string(),
+  max_steps: z.number().int().positive(),
+  max_cost_usd: z.number().nonnegative(),
+  quota_note: z.string(),
+});
+
+export const SubagentFinished = Base.extend({
+  type: z.literal("subagent_finished"),
+  task: z.string(),
+  status: RunStatus,
+  summary: z.string(),
+  steps: z.number().int().nonnegative(),
+  cost_usd: z.number().nonnegative(),
+});
+
+export const Verification = Base.extend({
+  type: z.literal("verification"),
+  outcome: z.enum(["pass", "fail"]),
+  checks: z.array(
+    z.object({
+      name: z.string(),
+      ok: z.boolean(),
+      detail: z.string(),
+    }),
+  ),
+  /** Fix rounds already spent when this verification ran (max 2, Fase 6). */
+  fixes: z.number().int().nonnegative(),
+});
+
 export const RunFinished = Base.extend({
   type: z.literal("run_finished"),
   status: RunStatus,
@@ -183,6 +247,11 @@ export const AgentEvent = z.discriminatedUnion("type", [
   PreviewReady,
   ArtifactReady,
   ErrorEvent,
+  CheckpointCreated,
+  CheckpointRestored,
+  SubagentStarted,
+  SubagentFinished,
+  Verification,
   RunFinished,
 ]);
 export type AgentEvent = z.infer<typeof AgentEvent>;
@@ -213,7 +282,10 @@ type Payload<T extends EventType> = Omit<
 /** Creates an emitter that stamps envelope fields and validates every event. */
 export function createEmitter(runId: string, sink: (e: AgentEvent) => void) {
   let seq = 0;
-  return function emit<T extends EventType>(type: T, data: Payload<T>): AgentEvent {
+  return function emit<T extends EventType>(
+    type: T,
+    data: Payload<T>,
+  ): AgentEvent {
     const event = AgentEvent.parse({
       v: PROTOCOL_VERSION,
       seq: seq++,

@@ -28,6 +28,8 @@ const state = {
   lastPrompt: "",
   approvalId: null,
   think: null, // { block, labelEl, timer, linesEl, rows: Map, count }
+  planEl: null, // Todo panel (Fase 5), rendered from plan_updated events
+  lastThink: null, // finished think block, for the resume button
   explainEl: null,
   explainRaw: "",
   files: new Map(), // path -> { bytes }
@@ -466,8 +468,10 @@ function switchFolderTab(tabName) {
   });
   $("#tabHistory").hidden = tabName !== "history";
   $("#tabSkills").hidden = tabName !== "skills";
+  $("#tabCheckpoints").hidden = tabName !== "checkpoints";
   if (tabName === "history") void renderSheetHistory();
   if (tabName === "skills") void renderSheetSkills();
+  if (tabName === "checkpoints") void renderSheetCheckpoints();
 }
 
 function renderSheetHistory() {
@@ -556,6 +560,73 @@ function renderSheetSkills() {
       const empty = document.createElement("div");
       empty.className = "exp-empty";
       empty.textContent = "Daftar skill gagal dimuat dari server.";
+      box.appendChild(empty);
+    });
+}
+
+function renderSheetCheckpoints() {
+  const box = $("#sheetCheckpointList");
+  box.replaceChildren();
+  return fetchJson("/api/checkpoints")
+    .then((list) => {
+      if (!list.length) {
+        const empty = document.createElement("div");
+        empty.className = "exp-empty";
+        empty.textContent =
+          "Belum ada checkpoint. Checkpoint dibuat otomatis di awal tiap run.";
+        box.appendChild(empty);
+        return;
+      }
+      for (const cp of list) {
+        const item = document.createElement("div");
+        item.className = "exp-item";
+        const mainEl = document.createElement("div");
+        mainEl.className = "exp-main";
+        const title = document.createElement("b");
+        title.textContent = cp.id;
+        const meta = document.createElement("small");
+        meta.textContent =
+          new Date(cp.created_at).toLocaleString("id-ID", {
+            day: "numeric",
+            month: "short",
+            hour: "2-digit",
+            minute: "2-digit",
+          }) + ` · ${cp.method} · ${cp.files.length} file`;
+        mainEl.append(title, meta);
+        const restore = document.createElement("button");
+        restore.type = "button";
+        restore.className = "cp-restore";
+        restore.textContent = "Pulihkan";
+        restore.addEventListener("click", async () => {
+          if (
+            !window.confirm(
+              `Pulihkan workspace ke checkpoint ${cp.id}?\nFile yang dibuat setelah checkpoint akan dihapus, file yang diubah kembali ke isi saat checkpoint dibuat.`,
+            )
+          )
+            return;
+          restore.disabled = true;
+          try {
+            const r = await fetch(`/api/checkpoints/${cp.id}/restore`, {
+              method: "POST",
+            });
+            if (!r.ok) throw new Error("gagal");
+            const data = await r.json();
+            toast(
+              `Checkpoint dipulihkan (${data.files_restored} file) — kirim perintah baru untuk melanjutkan.`,
+            );
+          } catch {
+            toast("Gagal memulihkan checkpoint.");
+            restore.disabled = false;
+          }
+        });
+        item.append(mainEl, restore);
+        box.appendChild(item);
+      }
+    })
+    .catch(() => {
+      const empty = document.createElement("div");
+      empty.className = "exp-empty";
+      empty.textContent = "Daftar checkpoint gagal dimuat dari server.";
       box.appendChild(empty);
     });
 }
@@ -816,7 +887,101 @@ function finishThink(status, steps) {
     t.block.classList.add(status === "error" ? "err" : "done");
     if (status === "completed") t.block.classList.add("collapsed");
   }
+  state.lastThink = t.count === 0 ? null : t.block;
   state.think = null;
+}
+
+// ---------- Fase 5: Todo panel (plan_updated) ----------
+
+function renderPlan(items) {
+  let panel = state.planEl;
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.className = "plan-panel";
+    const head = document.createElement("div");
+    head.className = "plan-head";
+    head.textContent = "Rencana";
+    panel.appendChild(head);
+    const list = document.createElement("ul");
+    list.className = "plan-list";
+    panel.appendChild(list);
+    state.planEl = panel;
+    main.prepend(panel);
+  }
+  const list = panel.querySelector(".plan-list");
+  list.replaceChildren();
+  for (const it of items) {
+    const li = document.createElement("li");
+    li.className = "plan-item " + it.status;
+    const mark = document.createElement("span");
+    mark.className = "plan-mark";
+    mark.textContent =
+      it.status === "done" ? "✓" : it.status === "doing" ? "›" : "○";
+    const tx = document.createElement("span");
+    tx.textContent = it.text;
+    li.append(mark, tx);
+    list.appendChild(li);
+  }
+  scrollDown();
+}
+
+// ---------- Fase 5: input suara (Web Speech API, tanpa key) ----------
+
+function setupVoice() {
+  const btn = $("#micBtn");
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    btn.hidden = true;
+    return;
+  }
+  let rec = null;
+  let listening = false;
+  btn.addEventListener("click", () => {
+    if (listening) {
+      rec?.stop();
+      return;
+    }
+    rec = new SR();
+    rec.lang = "id-ID";
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    let finalText = "";
+    rec.onresult = (ev) => {
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const r = ev.results[i];
+        if (r.isFinal) finalText += r[0].transcript;
+        else interim += r[0].transcript;
+      }
+      const base = input.dataset.base ?? "";
+      input.value = (base + finalText + interim).trimStart();
+      autoGrow();
+      updateSendState();
+    };
+    const stop = () => {
+      listening = false;
+      btn.classList.remove("listening");
+      btn.setAttribute("aria-label", "Input suara");
+      delete input.dataset.base;
+      updateSendState();
+    };
+    rec.onstart = () => {
+      listening = true;
+      btn.classList.add("listening");
+      btn.setAttribute("aria-label", "Berhenti merekam");
+      input.dataset.base = input.value ? input.value + " " : "";
+    };
+    rec.onend = stop;
+    rec.onerror = () => {
+      stop();
+      toast("Input suara gagal — coba lagi atau ketik manual.");
+    };
+    try {
+      rec.start();
+    } catch {
+      stop();
+    }
+  });
 }
 
 function explainBox() {
@@ -840,6 +1005,44 @@ function addErrorCard(title, message) {
   });
   main.appendChild(card);
   scrollDown(true);
+}
+
+// ---------- Fase 6: verification card + diff review ----------
+
+function renderVerification(e) {
+  const card = document.createElement("div");
+  card.className = "verify-card " + (e.outcome === "pass" ? "pass" : "fail");
+  const title = document.createElement("b");
+  title.textContent =
+    e.outcome === "pass"
+      ? "✓ Verifikasi sendiri lolos"
+      : `✗ Verifikasi sendiri menemukan masalah (perbaikan ${e.fixes}/2)`;
+  card.appendChild(title);
+  const list = document.createElement("ul");
+  for (const c of e.checks || []) {
+    const li = document.createElement("li");
+    li.textContent = `${c.ok ? "✓" : "✗"} ${c.name} — ${c.detail}`;
+    list.appendChild(li);
+  }
+  card.appendChild(list);
+  main.appendChild(card);
+  scrollDown(true);
+}
+
+function renderDiffs() {
+  for (const [path, info] of state.files) {
+    if (!info.diff) continue;
+    const details = document.createElement("details");
+    details.className = "diff-block";
+    const summary = document.createElement("summary");
+    summary.textContent = `Diff: ${path}`;
+    details.appendChild(summary);
+    const pre = document.createElement("pre");
+    pre.textContent = info.diff;
+    details.appendChild(pre);
+    main.appendChild(details);
+  }
+  if ([...state.files.values()].some((f) => f.diff)) scrollDown(true);
 }
 
 // ---------- Result card + versions ----------
@@ -1021,11 +1224,23 @@ async function renderCode() {
   );
   const tabs = $("#ovFtabs");
   tabs.replaceChildren();
+  let lastDir = null;
   viewable.forEach((f, i) => {
+    // Pohon file: kelompokkan per folder; file di root tampil di bawah "∕".
+    const slash = f.path.lastIndexOf("/");
+    const dir = slash >= 0 ? f.path.slice(0, slash) : "";
+    if (dir !== lastDir) {
+      lastDir = dir;
+      const h = document.createElement("span");
+      h.className = "ov-fdir";
+      h.textContent = dir === "" ? "∕" : dir + "/";
+      tabs.appendChild(h);
+    }
     const b = document.createElement("button");
     b.type = "button";
     b.className = "ov-ftab" + (i === state.overlayFileIdx ? " active" : "");
-    b.textContent = f.path;
+    b.textContent = slash >= 0 ? f.path.slice(slash + 1) : f.path;
+    b.title = f.path;
     b.addEventListener("click", () => {
       state.overlayFileIdx = i;
       void renderCode();
@@ -1089,18 +1304,15 @@ $("#ovRefreshBtn").addEventListener("click", () => {
   if (state.overlayVersion)
     setFrameSource($("#previewFrame"), state.overlayVersion);
 });
-$("#ovNewTabBtn").addEventListener("click", async () => {
+$("#ovNewTabBtn").addEventListener("click", () => {
   const v = state.overlayVersion;
   if (!v) return;
-  if (v.content != null) {
-    const url = URL.createObjectURL(
-      new Blob([v.content], { type: "text/html" }),
-    );
-    window.open(url, "_blank", "noopener,noreferrer");
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  } else {
-    window.open(previewUrl(v.path), "_blank", "noopener,noreferrer");
-  }
+  // Never open agent content as a blob: URL: a blob inherits this page's
+  // origin, so its scripts could call the unauthenticated API. /preview/
+  // serves the same file with a sandbox CSP, keeping the opaque origin.
+  // (Trade-off: an old version opens the file's current content, not the
+  // snapshot — the snapshot stays visible in the sandboxed iframe.)
+  window.open(previewUrl(v.path), "_blank", "noopener,noreferrer");
 });
 $("#ovCopyBtn").addEventListener("click", async () => {
   const v = state.overlayVersion;
@@ -1192,7 +1404,11 @@ function handle(e) {
       break;
 
     case "file_changed":
-      state.files.set(e.path, { bytes: e.bytes });
+      state.files.set(e.path, { bytes: e.bytes, diff: e.diff });
+      break;
+
+    case "verification":
+      renderVerification(e);
       break;
 
     case "usage":
@@ -1204,6 +1420,36 @@ function handle(e) {
         `Batas ${e.kind === "steps" ? "langkah" : "biaya"} ${e.percent}% tercapai`,
       );
       break;
+
+    case "plan_updated":
+      renderPlan(e.items);
+      break;
+
+    case "checkpoint_created":
+      toast(`Checkpoint ${e.method} dibuat (${e.files} file)`);
+      break;
+
+    case "checkpoint_restored":
+      toast(`Checkpoint dipulihkan (${e.files_restored} file)`);
+      if (!$("#tabCheckpoints").hidden) void renderSheetCheckpoints();
+      break;
+
+    case "subagent_started":
+      thinkLine(`sub:${e.task}`, `Subagent: ${e.task}`);
+      toast(
+        "Subagent jalan — kuota gratis OpenRouter (50/hari) dipakai bersama",
+      );
+      break;
+
+    case "subagent_finished": {
+      const row = state.think && state.think.rows.get(`sub:${e.task}`);
+      if (row) {
+        row.line.className =
+          "think-line " + (e.status === "completed" ? "ok" : "fail");
+        row.line.textContent = `Subagent: ${e.task} — ${e.status} (${e.steps} langkah, $${e.cost_usd.toFixed(4)})`;
+      }
+      break;
+    }
 
     case "error":
       if (!e.retryable) addErrorCard("Agent mengalami masalah", e.message);
@@ -1217,7 +1463,9 @@ function handle(e) {
         renderMarkdown(explainBox(), e.summary);
       }
       if (state.replaying) break;
+      renderDiffs();
       void finishRunLive(e);
+      if (e.status === "budget_exceeded" && e.resumable) showResume();
       break;
     }
 
@@ -1274,6 +1522,11 @@ function listen(runId) {
     "budget_warning",
     "preview_ready",
     "artifact_ready",
+    "checkpoint_created",
+    "checkpoint_restored",
+    "subagent_started",
+    "subagent_finished",
+    "verification",
     "error",
     "run_finished",
   ];
@@ -1296,6 +1549,10 @@ async function start(message) {
   state.explainEl = null;
   state.explainRaw = "";
   state.revDismissed = false;
+  if (state.planEl) {
+    state.planEl.remove();
+    state.planEl = null;
+  }
   if (heroEl.isConnected) heroEl.remove();
   addUser(message);
   setBusy(true);
@@ -1346,6 +1603,55 @@ async function stopRun() {
     toast("Menghentikan agent…");
   } catch {
     toast("Gagal mengirim perintah henti.");
+  }
+}
+
+// Lanjutkan run yang berhenti karena batas: server membuat run baru di sesi
+// yang sama dengan batas baru; riwayat sesi sudah berisi transkrip run lama,
+// jadi agent meneruskan dari titik berhentinya.
+function showResume() {
+  if (!state.runId) return;
+  const wrap = document.createElement("div");
+  wrap.className = "resume-wrap";
+  const note = document.createElement("small");
+  note.textContent =
+    "Batas langkah/biaya habis. Lanjutkan dengan batas baru — agent meneruskan dari riwayat sesi ini.";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn primary";
+  btn.textContent = "Lanjutkan run";
+  btn.addEventListener("click", () => {
+    wrap.remove();
+    void resumeRun();
+  });
+  wrap.append(note, btn);
+  const host =
+    state.lastThink && state.lastThink.isConnected ? state.lastThink : main;
+  host.appendChild(wrap);
+}
+
+async function resumeRun() {
+  if (!state.runId || state.busy) return;
+  setBusy(true);
+  addThink("Melanjutkan run…");
+  try {
+    const r = await fetch(`/api/runs/${state.runId}/resume`, {
+      method: "POST",
+    });
+    if (r.status === 409)
+      throw new Error("Run tidak bisa dilanjutkan sekarang.");
+    if (!r.ok) throw new Error(`Server menolak permintaan (${r.status}).`);
+    const data = await r.json();
+    state.runId = data.run_id;
+    state.sessionId = data.session_id;
+    listen(data.run_id);
+  } catch (err) {
+    finishThink("error", 0);
+    setBusy(false);
+    addErrorCard(
+      "Gagal melanjutkan run",
+      err instanceof Error ? err.message : "Gagal menghubungi server.",
+    );
   }
 }
 
@@ -1489,6 +1795,7 @@ document.addEventListener("keydown", (ev) => {
 
 bindHero();
 setMeters(0, 0);
+setupVoice();
 updateSendState();
 updateModelLabel();
 syncFolderPreviews();

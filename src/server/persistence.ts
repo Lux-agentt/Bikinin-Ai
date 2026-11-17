@@ -14,6 +14,13 @@ import {
 import { join } from "node:path";
 import type { ChatCompletionMessageParam as Msg } from "openai/resources/chat/completions";
 import {
+  formatLessons,
+  mergeLessons,
+  parseLessons,
+  type FreshLesson,
+  type LessonEntry,
+} from "../agent/lessons.js";
+import {
   formatMemory,
   mergeFacts,
   parseMemory,
@@ -23,6 +30,7 @@ import {
 
 export const MEMORY_DIR = ".bikinin";
 export const MEMORY_FILE = "memory.md";
+export const LESSONS_FILE = "lessons.md";
 export const SESSIONS_DIR = "sessions";
 
 export function memoryDirPath(workspace: string): string {
@@ -31,6 +39,10 @@ export function memoryDirPath(workspace: string): string {
 
 export function memoryFilePath(workspace: string): string {
   return join(workspace, MEMORY_DIR, MEMORY_FILE);
+}
+
+export function lessonsFilePath(workspace: string): string {
+  return join(workspace, MEMORY_DIR, LESSONS_FILE);
 }
 
 export function sessionsDirPath(workspace: string): string {
@@ -165,5 +177,35 @@ export async function appendMemoryFacts(
   if (merged.length === existing.length) return 0;
   await mkdir(memoryDirPath(workspace), { recursive: true });
   await atomicWrite(memoryFilePath(workspace), formatMemory(merged));
+  return merged.length - existing.length;
+}
+
+/** Reads the episodic lessons file; missing or unreadable means empty. */
+export async function readLessonEntries(
+  workspace: string,
+): Promise<LessonEntry[]> {
+  try {
+    return parseLessons(await readFile(lessonsFilePath(workspace), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Appends fresh lessons to the lessons file (deduped, secret-filtered,
+ * capped). Returns how many entries were actually added; writes nothing
+ * when zero.
+ */
+export async function appendLessons(
+  workspace: string,
+  lessons: FreshLesson[],
+): Promise<number> {
+  if (lessons.length === 0) return 0;
+  const existing = await readLessonEntries(workspace);
+  const today = new Date().toISOString().slice(0, 10);
+  const merged = mergeLessons(existing, lessons, today);
+  if (merged.length === existing.length) return 0;
+  await mkdir(memoryDirPath(workspace), { recursive: true });
+  await atomicWrite(lessonsFilePath(workspace), formatLessons(merged));
   return merged.length - existing.length;
 }

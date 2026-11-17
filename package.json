@@ -13,6 +13,7 @@
     "cli": "tsx src/cli.ts",
     "check-provider": "tsx scripts/check-provider.ts",
     "compare": "tsx scripts/compare-models.ts",
+    "eval": "tsx scripts/eval.ts",
     "serve": "tsx src/serve.ts"
   },
   "dependencies": {
