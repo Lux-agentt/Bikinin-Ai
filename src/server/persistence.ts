@@ -120,6 +120,12 @@ export async function deleteSession(
 ): Promise<void> {
   if (!SESSION_ID_RE.test(sessionId)) return;
   await rm(sessionFilePath(workspace, sessionId), { force: true });
+  // The event log (.jsonl) belongs to the same session: remove it too,
+  // otherwise a deleted session would come back through --continue.
+  // (Inline path on purpose: importing event-log.ts here would be a cycle.)
+  await rm(join(workspace, MEMORY_DIR, SESSIONS_DIR, `${sessionId}.jsonl`), {
+    force: true,
+  });
 }
 
 /** Deletes persisted sessions beyond the newest `keep` (by updated_at). */

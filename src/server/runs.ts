@@ -25,8 +25,10 @@ import {
   saveSession,
   type PersistedSession,
 } from "./persistence.js";
+import { createEventLog, type EventLog } from "./event-log.js";
 import { MAX_SESSIONS, SessionHistory } from "../agent/history.js";
 import { buildMemoryContext, extractFacts } from "../agent/memory.js";
+import { extractiveSummary } from "../agent/summarize.js";
 
 export interface RunRecord {
   runId: string;
@@ -36,6 +38,8 @@ export interface RunRecord {
   listeners: Set<(e: AgentEvent) => void>;
   abort: AbortController;
   pending: Map<string, (allow: boolean) => void>;
+  /** On-disk NDJSON log for this run's session (Fase 1). */
+  log: EventLog;
 }
 
 /** Lightweight metadata for the history panel. The title is the first prompt.
@@ -238,12 +242,16 @@ export class RunManager {
       listeners: new Set(),
       abort: new AbortController(),
       pending: new Map(),
+      log: createEventLog(this.opts.workspace, sessionId),
     };
     this.runs.set(runId, rec);
     this.activeRunId = runId;
 
     const emit: EmitFn = createEmitter(runId, (e) => {
       rec.events.push(e);
+      // Fase 1: every event is also appended to the session .jsonl log,
+      // so --continue and a later restart can replay the run.
+      rec.log.append(e);
       if (e.type === "run_finished") rec.finished = true;
       for (const listener of rec.listeners) listener(e);
     });
@@ -277,6 +285,9 @@ export class RunManager {
     effort: "sedang" | "tinggi",
   ): Promise<void> {
     const history = this.sessions.get(rec.sessionId);
+    // Fase 1: trim old history into a summary before the run, so the new
+    // run's prompt fits the budget without silently losing old context.
+    history?.summarizeOldest(extractiveSummary);
     // Long-term memory + recent sessions, injected into the system prompt so
     // the model sees what it learned in earlier sessions. A failed read
     // means no memory, never a failed run.
@@ -306,6 +317,12 @@ export class RunManager {
       history?.add(result.transcript);
       const m = this.meta.get(rec.sessionId);
       if (m) m.lastStatus = result.status;
+      // The .jsonl log drains in the background (same trade-off as the
+      // session .json below): awaiting it here would keep the run "busy"
+      // after run_finished was already emitted, so the next POST would get
+      // 409. The in-memory event buffer is the source of truth during the
+      // run; the log is durability, and it catches up within milliseconds.
+      void rec.log.flush().catch(() => {});
       // Durability: a crash or restart after this point must not lose the
       // session or what the run learned. Fire-and-forget on purpose: the
       // in-memory state above is already consistent, and awaiting disk IO
@@ -318,6 +335,7 @@ export class RunManager {
       // runAgent normally always emits run_finished; this is a last-resort guard.
       const m = this.meta.get(rec.sessionId);
       if (m) m.lastStatus = "error";
+      void rec.log.flush().catch(() => {});
       void this.persistSession(rec.sessionId).catch(() => {});
       if (!rec.finished) {
         emit("error", {

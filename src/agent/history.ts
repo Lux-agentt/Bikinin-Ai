@@ -1,12 +1,16 @@
 // Conversation memory for a session. A run's transcript is compacted (long tool output and long
 // tool arguments are cut) and replayed to the model on the next run, so the agent remembers
-// what was asked and what it did. Oldest runs are dropped first when over budget.
+// what was asked and what it did. When the history approaches the budget, the oldest runs are
+// replaced by an extractive summary (see summarize.ts) instead of being dropped silently;
+// only when even that cannot help (a single run over budget) is the oldest content dropped.
 import type { ChatCompletionMessageParam as Msg } from "openai/resources/chat/completions";
 
 const TOOL_OUTPUT_KEEP = 1200;
 const ARG_STRING_KEEP = 300;
 const ARG_STRING_HEAD = 200;
 export const HISTORY_CHAR_BUDGET = 80_000;
+/** Start summarizing (instead of dropping) once the history passes 75% of budget. */
+export const SUMMARY_THRESHOLD_CHARS = 60_000;
 export const MAX_SESSIONS = 20;
 
 const size = (msgs: Msg[]): number =>
@@ -116,6 +120,30 @@ export class SessionHistory {
     // Keep at least the newest run, even if it alone is over budget.
     while (this.runs.length > 1 && this.chars() > HISTORY_CHAR_BUDGET)
       this.runs.shift();
+  }
+
+  get charCount(): number {
+    return this.chars();
+  }
+
+  /**
+   * Replaces the oldest runs with one summary message (made by the caller's
+   * summarizer, e.g. extractiveSummary) once the history passes
+   * SUMMARY_THRESHOLD_CHARS. The newest run is never touched. Returns how
+   * many runs were replaced; 0 means nothing needed trimming.
+   */
+  summarizeOldest(makeSummary: (runs: Msg[][]) => string): number {
+    if (this.runs.length <= 1 || this.chars() <= SUMMARY_THRESHOLD_CHARS)
+      return 0;
+    const dropped: Msg[][] = [];
+    while (this.runs.length > 1 && this.chars() > SUMMARY_THRESHOLD_CHARS) {
+      dropped.push(this.runs.shift()!);
+    }
+    if (dropped.length === 0) return 0;
+    const summary = makeSummary(dropped).trim();
+    if (summary.length > 0)
+      this.runs.unshift([{ role: "assistant", content: summary }]);
+    return dropped.length;
   }
 
   messages(): Msg[] {

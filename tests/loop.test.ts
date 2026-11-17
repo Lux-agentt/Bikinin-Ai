@@ -181,4 +181,22 @@ describe("agent loop event contract", () => {
     expect(ofType(events, "error")[0].code).toBe("internal");
     expectWellFormed(events);
   });
+
+  it("still blocks a dangerous command when approve() always says yes (--yolo)", async () => {
+    // --yolo only auto-approves "confirm" verdicts; "block" is enforced
+    // before approve() is ever consulted.
+    const { events, result } = await run(
+      [
+        withCalls(call("t1", "run_command", { command: "rm -rf /" })),
+        finalText("selesai"),
+      ],
+      { approve: async () => true },
+    );
+    expect(result.status).toBe("completed");
+    expect(ofType(events, "error")[0].code).toBe("command_blocked");
+    expect(ofType(events, "tool_call_finished")[0].summary).toContain(
+      "diblokir",
+    );
+    expectWellFormed(events);
+  });
 });

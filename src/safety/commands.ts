@@ -18,6 +18,22 @@ const BLOCKED: Array<{ re: RegExp; reason: string }> = [
   { re: /\$HOME|\$\{HOME\}/, reason: "referensi $HOME tidak diizinkan" },
   { re: /\bsudo\b/, reason: "sudo tidak diizinkan" },
   {
+    // Perintah jalan via /bin/sh -c, jadi substitusi perintah mengeksekusi
+    // apa pun di dalamnya tanpa lewat classifier (mis. echo $(rm -rf /)).
+    re: /\$\(/,
+    reason: "substitusi perintah $(...) tidak diizinkan",
+  },
+  {
+    re: /`/,
+    reason: "backtick (substitusi perintah) tidak diizinkan",
+  },
+  {
+    // Hanya saat env/printenv menjadi perintahnya (awal perintah atau
+    // sesudah pemisah && ; |) — "grep env file" tetap boleh.
+    re: /(^|[;&|]\s*)(env|printenv)(\s|$)/,
+    reason: "env/printenv tidak diizinkan",
+  },
+  {
     re: /(^|[\s;&|])(git|gh|ssh|scp|rsync)(\s|$)/,
     reason: "git/gh/ssh tidak diizinkan dari agent",
   },

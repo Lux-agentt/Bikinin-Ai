@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Config } from "../src/config.js";
-import type { AgentEvent } from "../src/events.js";
+import { AgentEvent } from "../src/events.js";
 import type { ChatResult, LlmClient, ToolCallReq } from "../src/llm/client.js";
 import { createAppServer } from "../src/server/http.js";
 import { RunManager } from "../src/server/runs.js";
@@ -424,6 +424,50 @@ describe("web server", () => {
     expect(seen[3][0]).toContain("namaku Rizqi, panggil aku Qi");
     expect(seen[3][0]).toContain("Sesi terakhir:");
     expect(seen[3][0]).toContain("proyek kedua");
+  });
+
+  it("writes every event to the session .jsonl log (valid NDJSON, no secrets)", async () => {
+    const { url, workspace } = await boot([
+      withCalls(
+        call("t1", "write_file", {
+          path: "index.html",
+          content: "<h1>Kopi</h1>",
+        }),
+      ),
+      finalText("Selesai."),
+    ]);
+    const started = await post(`${url}/api/runs`, { message: "buat halaman" });
+    expect(started.status).toBe(201);
+    const { run_id, session_id } = (await started.json()) as {
+      run_id: string;
+      session_id: string;
+    };
+    await (await fetch(`${url}/api/runs/${run_id}/events`)).text();
+    const logPath = join(
+      workspace,
+      ".bikinin",
+      "sessions",
+      `${session_id}.jsonl`,
+    );
+    // The log drains in the background after run_finished, so wait until
+    // the final event has reached disk instead of just waiting for the file.
+    await waitFor(async () => {
+      try {
+        return (await readFile(logPath, "utf8")).includes("run_finished");
+      } catch {
+        return false;
+      }
+    });
+    const raw = await readFile(logPath, "utf8");
+    const lines = raw.trim().split("\n");
+    expect(lines.length).toBeGreaterThan(2);
+    const parsed = lines.map((l) => AgentEvent.safeParse(JSON.parse(l)));
+    expect(parsed.every((p) => p.success)).toBe(true);
+    const types = parsed.map((p) => p.success && p.data.type);
+    expect(types[0]).toBe("run_started");
+    expect(types.at(-1)).toBe("run_finished");
+    expect(raw).not.toContain("SECRET_KEY_VALUE");
+    expect(raw).not.toContain(workspace);
   });
 
   it("validates request bodies", async () => {

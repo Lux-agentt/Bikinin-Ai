@@ -56,4 +56,33 @@ describe("resolveInWorkspace", () => {
       code: "path_blocked",
     });
   });
+
+  it("blocks a symlink nested in a subdirectory that points outside", async () => {
+    const { ws, outside } = await setup();
+    await mkdir(join(ws, "sub"));
+    await symlink(outside, join(ws, "sub", "link"));
+    await expect(
+      resolveInWorkspace(ws, "sub/link/secret.txt"),
+    ).rejects.toMatchObject({ code: "path_blocked" });
+  });
+
+  it("blocks .. that escapes through a symlinked parent", async () => {
+    const { ws } = await setup();
+    await expect(
+      resolveInWorkspace(ws, "sub/../../outside/secret.txt"),
+    ).rejects.toMatchObject({ code: "path_blocked" });
+  });
+
+  it("allows .. that stays inside the workspace", async () => {
+    const { ws } = await setup();
+    const r = await resolveInWorkspace(ws, "sub/../file.txt");
+    expect(r.rel).toBe("file.txt");
+  });
+
+  it("rejects paths with a NUL byte", async () => {
+    const { ws } = await setup();
+    await expect(
+      resolveInWorkspace(ws, "a\0b.txt"),
+    ).rejects.toMatchObject({ code: "path_blocked" });
+  });
 });

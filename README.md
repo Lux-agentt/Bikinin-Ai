@@ -22,3 +22,32 @@ UI bisa dibuka tanpa `.env`, tapi run agent butuh kunci LLM. Isi file `.env` dar
 - `npm run cli` — jalankan agent dari terminal
 - `npm test` — jalankan test
 - `npm run typecheck` — cek tipe TypeScript
+
+### CLI
+
+```
+npm run cli -- "buatkan landing page kedai kopi" [--json] [--yolo]
+npm run cli -- --continue [s_xxxxxxxx] "lanjutkan" [--json] [--yolo]
+```
+
+- `--json` — cetak kejadian sebagai NDJSON (satu baris per kejadian) ke stdout.
+- `--continue [s_xxxxxxxx]` — lanjutkan sesi lama; tanpa id, sesi terbaru yang
+  dilanjutkan. Riwayat dibaca dari log kejadian sesi
+  (`<workspace>/.bikinin/sessions/<id>.jsonl`), jadi tetap bisa dilanjutkan
+  walau server/CLI sudah restart.
+- `--yolo` — setujui semua perintah di luar allowlist tanpa bertanya. Hanya
+  bila flag ini dipakai eksplisit; perintah yang diblokir kebijakan
+  (`rm -rf /`, `sudo`, `git`, dsb.) tetap diblokir.
+
+### Log sesi dan ringkasan konteks
+
+- Setiap kejadian run (CLI maupun web UI) ditulis ke
+  `<workspace>/.bikinin/sessions/<session_id>.jsonl` (NDJSON, satu kejadian
+  per baris). Nilai yang mirip rahasia (API key, token) diganti `[rahasia]`
+  sebelum ditulis.
+- Riwayat sesi tersimpan juga sebagai `<session_id>.json` di folder yang sama
+  (dipulihkan saat server start).
+- Saat riwayat mendekati batas (60.000 dari 80.000 karakter), run lama
+  diganti satu ringkasan deterministik (permintaan, file yang diubah,
+  keputusan) — bukan dibuang begitu saja. Tidak ada panggilan LLM tambahan
+  untuk ringkasan ini.
