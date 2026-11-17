@@ -165,9 +165,14 @@ describe("read_skill tool", () => {
 });
 
 describe("system prompt wiring", () => {
-  it("lists the real website skill and nothing else is leaked", async () => {
+  it("lists the real website and remotion skills and nothing else is leaked", async () => {
     const skills = await listSkills(REPO_SKILLS_DIR);
     expect(skills).toEqual([
+      {
+        name: "remotion",
+        description:
+          "Gunakan saat pengguna ingin membuat video, animasi, atau motion graphic dengan Remotion.",
+      },
       {
         name: "website",
         description:
@@ -176,6 +181,7 @@ describe("system prompt wiring", () => {
     ]);
     const prompt = await loadSystemPrompt(formatSkillList(skills));
     expect(prompt).toContain("- website: Gunakan saat pengguna ingin membuat");
+    expect(prompt).toContain("- remotion: Gunakan saat pengguna ingin membuat video");
     expect(prompt).not.toContain("{{DAFTAR_SKILL}}");
     expect(prompt).not.toContain("(belum ada skill)");
     // Only name + description enter the prompt, never the full skill text.

@@ -154,9 +154,9 @@ Catatan keamanan: penyedia adalah perantara pihak ketiga. Jangan kirim rahasia l
 
 ### Fase 3: Remotion
 
-- [ ] Skill `remotion`: setup project, komposisi, `useCurrentFrame`, `interpolate`, `spring`, `Sequence`, audio, render via CLI, batas performa.
-- [ ] Tool `render_video` (membungkus `npx remotion render`) dengan batas durasi dan resolusi.
-- [ ] Cek frame dengan still sebelum render penuh.
+- [x] Skill `remotion`: setup project, komposisi, `useCurrentFrame`, `interpolate`, `spring`, `Sequence`, audio, render via CLI, batas performa.
+- [x] Tool `render_video` (membungkus `npx remotion render`) dengan batas durasi dan resolusi.
+- [x] Cek frame dengan still sebelum render penuh.
 
 **Selesai jika:** "buat video 10 detik intro dengan teks animasi" menghasilkan MP4 yang valid.
 
