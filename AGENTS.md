@@ -803,6 +803,7 @@ description: Gunakan saat pengguna minta perbaikan atau perubahan pada situs Nex
 - Mengubah konfigurasi Wrangler, `compatibility_date`, bindings, variabel lingkungan, DNS, atau pengaturan Cloudflare.
 - Mengganti adapter (OpenNext/vinext) atau versi Next.js, atau menambah dependensi besar.
 - Force push, menghapus/mengubah cabang lain, menyentuh `.env` atau file rahasia.
+- Skill bug bounty / web3 hanya dipakai pada target yang in-scope dan programnya memperbolehkan laporan AI/otomatis — cek scope + larangan tiap program dulu; kalau tidak diperbolehkan, jangan dipakai.
 
 ## Catatan teknis
 - Runtime Workers tidak mendukung semua API Node.js. Hindari modul Node yang tidak didukung; ikuti pola yang sudah dipakai di kode yang ada.
