@@ -33,10 +33,18 @@ describe("resolveProviders", () => {
     ]);
   });
 
-  it("names the missing variable but never a value", () => {
-    expect(() =>
-      resolveProviders({ BIKININ_PROVIDERS: LIST, NANOGPT_API_KEY: "k1" }),
-    ).toThrow("OPENROUTER_API_KEY");
+  it("skips a provider whose key is missing instead of failing the chain", () => {
+    const ps = resolveProviders({
+      BIKININ_PROVIDERS: LIST,
+      NANOGPT_API_KEY: "k1",
+    });
+    expect(ps.map((p) => [p.name, p.apiKey])).toEqual([["nano", "k1"]]);
+  });
+
+  it("fails only when no provider has a key, naming the missing variables", () => {
+    expect(() => resolveProviders({ BIKININ_PROVIDERS: LIST })).toThrow(
+      "NANOGPT_API_KEY, OPENROUTER_API_KEY",
+    );
   });
 
   it("rejects invalid JSON and invalid entries", () => {

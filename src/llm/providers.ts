@@ -51,21 +51,34 @@ export function resolveProviders(env: Env): ProviderConfig[] {
       throw new Error(
         `BIKININ_PROVIDERS tidak valid:\n${issuesText(parsed.error)}`,
       );
-    return parsed.data.map((p) => {
+    // Satu key yang kosong tidak boleh mematikan seluruh rantai: lewati
+    // provider itu (peringatan berisi nama var saja, tanpa nilai) dan pakai
+    // provider yang key-nya ada. Baru gagal bila tidak ada satu pun yang bisa dipakai.
+    const resolved: ProviderConfig[] = [];
+    const missing: string[] = [];
+    for (const p of parsed.data) {
       const apiKey = env[p.keyEnv];
-      if (!apiKey)
-        throw new Error(
-          `Variabel ${p.keyEnv} kosong (dibutuhkan provider "${p.name}")`,
+      if (!apiKey) {
+        missing.push(p.keyEnv);
+        console.warn(
+          `[bikinin] provider "${p.name}" dilewati: ${p.keyEnv} kosong`,
         );
-      return {
+        continue;
+      }
+      resolved.push({
         name: p.name,
         baseUrl: p.baseUrl,
         apiKey,
         model: p.model,
         inPerM: p.inPerM,
         outPerM: p.outPerM,
-      };
-    });
+      });
+    }
+    if (resolved.length === 0)
+      throw new Error(
+        `Tidak ada provider yang bisa dipakai (key kosong: ${missing.join(", ")})`,
+      );
+    return resolved;
   }
 
   const legacy = Legacy.safeParse(env);
