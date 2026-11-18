@@ -8,6 +8,10 @@ import { defineTool } from "./types.js";
 
 const TIMEOUT_MS = 120_000;
 const MAX_BUFFER = 2 * 1024 * 1024;
+// Fase 9: instalasi dependensi memang lambat dan berisik — batas longgar
+// khusus jalur install (di luar sandbox, lihat isInstallCommand).
+const INSTALL_TIMEOUT_MS = 300_000;
+const INSTALL_MAX_BUFFER = 8 * 1024 * 1024;
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASS|CRED/i;
 
 // Variabel yang mengubah perilaku proses anak tanpa mengubah perintahnya:
@@ -101,6 +105,24 @@ const SANDBOX_SETUP_SCRIPT = [
 export function sandboxEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = (env.BIKININ_SANDBOX ?? "").trim().toLowerCase();
   return raw !== "off" && raw !== "0" && raw !== "false";
+}
+
+/**
+ * Fase 9: perintah instalasi dependensi TUNGGAL — `npm install`, `npm ci`,
+ * `npm i` (plus argumen apa pun, mis. nama paket atau flag), dan setaranya
+ * di pnpm/yarn. Perintah ini butuh network (registry), jadi dijalankan di
+ * luar sandbox — lihat run(). Perintah majemuk (mengandung &&, ;, |, atau
+ * baris baru) BUKAN install murni: tetap sandboxed, model harus memecahnya
+ * jadi dua panggilan. Classifier tetap jalan duluan di run(), jadi pola
+ * berbahaya di dalam perintah install (path absolut, $(...), assignment
+ * env) tetap diblokir sebelum apa pun dieksekusi.
+ */
+export function isInstallCommand(command: string): boolean {
+  const cmd = command.trim();
+  if (/[;&|\n]/.test(cmd)) return false;
+  return /^(?:npm\s+(?:install|i|ci)|pnpm\s+(?:install|i)|yarn\s+install)(?:\s|$)/.test(
+    cmd,
+  );
 }
 
 /**
@@ -208,15 +230,20 @@ export async function execSandboxed(
   });
 }
 
-function execShell(command: string, cwd: string): Promise<ShellResult> {
+function execShell(
+  command: string,
+  cwd: string,
+  timeoutMs = TIMEOUT_MS,
+  maxBuffer = MAX_BUFFER,
+): Promise<ShellResult> {
   return new Promise((resolve) => {
     execFile(
       "/bin/sh",
       ["-c", command],
       {
         cwd,
-        timeout: TIMEOUT_MS,
-        maxBuffer: MAX_BUFFER,
+        timeout: timeoutMs,
+        maxBuffer,
         env: { ...safeEnv(process.env), GIT_CEILING_DIRECTORIES: dirname(cwd) },
       },
       (error, stdout, stderr) => {
@@ -234,7 +261,7 @@ function execShell(command: string, cwd: string): Promise<ShellResult> {
 export const runCommandTool = defineTool({
   name: "run_command",
   description:
-    "Jalankan perintah shell di folder workspace (timeout 120 dtk), di dalam sandbox user-namespace: tanpa network, filesystem di luar workspace read-only/tersembunyi, env dibersihkan dari rahasia. Perintah di luar allowlist butuh persetujuan pengguna.",
+    "Jalankan perintah shell di folder workspace (timeout 120 dtk), di dalam sandbox user-namespace: tanpa network, filesystem di luar workspace read-only/tersembunyi, env dibersihkan dari rahasia. Pengecualian Fase 9: perintah instalasi dependensi tunggal (npm install/ci/i, pnpm install, yarn install) jalan di luar sandbox supaya bisa mengakses registry — tetap dengan classifier yang sama dan env yang di-scrub, tapi postinstall script ikut jalan di luar sandbox. Perintah di luar allowlist butuh persetujuan pengguna.",
   parameters: {
     type: "object",
     properties: { command: { type: "string", description: "Perintah shell" } },
@@ -252,13 +279,26 @@ export const runCommandTool = defineTool({
     if (verdict.decision === "block")
       throw new AgentError("command_blocked", verdict.reason);
 
-    // Default: sandbox. BIKININ_SANDBOX=off = jalan langsung (hanya
-    // classifier + cwd jail), untuk mesin tanpa user namespace.
-    const r = sandboxEnabled()
-      ? await execSandboxed(a.command, ctx.workspace)
-      : await execShell(a.command, ctx.workspace);
+    // Fase 9: instalasi dependensi butuh network (registry) — jalankan di
+    // luar sandbox via execShell (cwd tetap workspace, env tetap safeEnv).
+    // Perintah install verdict-nya "confirm" di classifier (termasuk
+    // `npm ci` sejak Fase 9), jadi jalur ini hanya ditempuh sesudah
+    // persetujuan pengguna di loop — kecuali --yolo, sesuai kebijakan
+    // --yolo yang sudah didokumentasikan. Perintah lain tidak berubah:
+    // sandbox bila nyala, execShell biasa bila BIKININ_SANDBOX=off.
+    const isInstall = isInstallCommand(a.command);
+    const r = isInstall
+      ? await execShell(
+          a.command,
+          ctx.workspace,
+          INSTALL_TIMEOUT_MS,
+          INSTALL_MAX_BUFFER,
+        )
+      : sandboxEnabled()
+        ? await execSandboxed(a.command, ctx.workspace)
+        : await execShell(a.command, ctx.workspace);
     const summary = r.killed
-      ? "timeout (120 dtk)"
+      ? `timeout (${isInstall ? 300 : 120} dtk)`
       : r.ok
         ? "selesai (exit 0)"
         : `gagal (exit ${r.code})`;

@@ -117,8 +117,12 @@ const BLOCKED: Array<{ re: RegExp; reason: string }> = [
 ];
 
 // Each shell segment (split on && || ; | newline) must match one of these to run without asking.
+// `npm ci` sengaja TIDAK di sini sejak Fase 9: instalasi dependensi jalan
+// di luar sandbox (butuh network registry), jadi butuh persetujuan pengguna
+// seperti `npm install` — sebelumnya `npm ci` berstatus allow karena di
+// dalam sandbox ia tidak bisa mengambil apa pun dari network.
 const ALLOWED: RegExp[] = [
-  /^npm (run [\w:.-]+|test|ci|--version|-v)$/,
+  /^npm (run [\w:.-]+|test|--version|-v)$/,
   /^npx (tsc|vitest|tsx|prettier)( .*)?$/,
   /^tsc( .*)?$/,
   /^node [\w./-]+\.(m?js|ts)$/,

@@ -25,13 +25,76 @@ tidak berubah dan test-nya tetap lolos.
   dan butuh `BIKININ_SANDBOX=off` untuk jalan tanpa sandbox. Jangan klaim
   Codespace ter-sandbox sebelum seseorang menjalankan `unshare -Urm true`
   di sana.
-- `npm install`/`npm ci` lewat `run_command` GAGAL (tanpa network) — alur
-  bangun website untuk workspace baru jadi butuh jalur instalasi di luar
-  sandbox atau proxy registry (pekerjaan fase berikutnya).
+- `npm install`/`npm ci` lewat `run_command` GAGAL (tanpa network) —
+  DISELESAIKAN Fase 9: jalur install khusus di luar sandbox (lihat bagian
+  Fase 9 di bawah). `BIKININ_SANDBOX=off` tidak lagi dibutuhkan untuk
+  instalasi dependensi.
 - `/proc` masih terlihat (environ proses host TIDAK bisa dibaca —
   terverifikasi). `/dev` dibagi apa adanya (diperlukan `/dev/null`).
 - Sandbox hanya mencakup `run_command`; `render_video`/`web_search`/`git`
   tidak lewat sandbox ini (sengaja, di luar lingkup).
+
+## Fase 9 — instalasi dependensi di luar sandbox (2026-11-18)
+
+**Masalah:** `npm install`/`npm ci` lewat `run_command` gagal karena
+sandbox Fase 8 mematikan network. Agent tidak bisa membangun website di
+workspace baru tanpa `BIKININ_SANDBOX=off` (yang mematikan sandbox untuk
+SEMUA perintah).
+
+**Desain yang dipilih (a): jalur install khusus di luar sandbox.**
+Perintah instalasi dependensi TUNGGAL — `npm install`, `npm ci`, `npm i`
+(plus argumen apa pun: nama paket, flag), `pnpm install`/`pnpm i`,
+`yarn install` — dijalankan via `execShell` langsung (tanpa `unshare`),
+dengan cwd tetap di workspace, env tetap `safeEnv` (rahasia + variabel
+pengubah perilaku dibuang), dan classifier yang sama jalan duluan.
+Perintah lain TIDAK berubah: tetap sandboxed.
+
+**Kenapa bukan (b) registry proxy lokal:** proxy butuh proses baru yang
+tetap harus mengambil paket dari upstream (network di luar sandbox juga),
+ditambah konfigurasi registry per workspace dan dependensi baru — jauh
+lebih banyak bagian bergerak untuk masalah yang sama. Jalur (a) memakai
+kode yang sudah ada (`execShell`) dan tidak menambah dependensi.
+
+**Perubahan perilaku yang disengaja:**
+- `npm ci` pindah dari allowlist ke "confirm" di classifier: instalasi
+  kini jalan di luar sandbox dengan network, jadi harus ada persetujuan
+  pengguna seperti `npm install` (sebelumnya `npm ci` boleh tanpa tanya
+  karena di dalam sandbox ia tidak bisa mengambil apa pun dari network).
+- Timeout jalur install 300 dtk (bukan 120 dtk) dan buffer output 8 MB,
+  karena instalasi memang lambat dan berisik.
+- Perintah majemuk (`npm install && npm run build`) BUKAN install murni:
+  tetap sandboxed — model harus memecahnya jadi dua panggilan
+  `run_command`.
+
+**Risiko sisa (baca sebelum menyetujui install):**
+- Postinstall script paket yang diinstal ikut jalan di luar sandbox,
+  dengan network, sebagai user server — sama seperti `npm install` di
+  terminal biasa. Jangan setujui install dari registry/paket yang tidak
+  dikenal; `--ignore-scripts` tersedia bila ragu.
+- Flag `--registry` tidak diblokir classifier: yang mengarahkan npm ke
+  registry lain terlihat di teks perintah saat approval — periksa sebelum
+  menyetujui.
+- Cache npm tetap di HOME operator (`~/.npm`), dibagi semua workspace.
+- `BIKININ_SANDBOX=off` tetap mematikan sandbox untuk semua perintah;
+  jalur install tidak mengubah itu.
+
+**Verifikasi (VM ini):** `tests/sandbox.test.ts` 140 test (dari 105):
+routing dibuktikan fake npm di /tmp (perintah install melihatnya,
+perintah biasa tidak), install nyata `npm install` + `npm ci` dengan
+dep `file:` lokal (tanpa internet), classifier install tetap confirm dan
+pola berbahaya tetap block. `npm run typecheck` 0 error, `npm test`
+550/550 lolos.
+
+**Verifikasi live di Codespace (pemilik):**
+1. `unshare -Urm true` — pastikan user namespace tersedia (bila gagal,
+   sandbox mati dan SEMUA perintah jalan tanpa sandbox; install tetap
+   jalan karena memang di luar sandbox).
+2. Buat folder kosong, tulis `package.json` kecil dengan satu dep
+   registry (mis. `{"name":"cek","dependencies":{"is-odd":"3.0.1"}}`),
+   lalu jalankan `npm install` lewat agent dan `npm run build`
+   sesudahnya. Install harus berhasil dan `node_modules/is-odd` ada;
+   build tetap jalan sandboxed (mis. `curl` di dalam build tetap gagal).
+3. Cek `npm ci` meminta persetujuan dulu di UI (bukan langsung jalan).
 
 ## Batas fundamental — baca dulu
 
@@ -134,6 +197,6 @@ Pengecualian yang dipertahankan: `/dev/null` (`cat /dev/null`,
 - Penutup nyata untuk `node file.js` (menjalankan kode agent sebagai user
   OS terpisah / di container) adalah pekerjaan fase berikutnya, bukan
   perbaikan regex. Fase 8 menutupnya lewat user namespace untuk
-  `run_command` (bila `unshare` tersedia); isolasi container penuh dan
-  jalur instalasi dependensi di dalam sandbox tetap ditunda ke fase
-  berikutnya.
+  `run_command` (bila `unshare` tersedia); isolasi container penuh tetap
+  ditunda. Jalur instalasi dependensi diselesaikan Fase 9 — di luar
+  sandbox, bukan di dalam (lihat bagian Fase 9 di atas).

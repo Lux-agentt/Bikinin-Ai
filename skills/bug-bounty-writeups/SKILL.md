@@ -383,6 +383,15 @@ description: Learn bug bounty methodology from curated writeups, build recon and
 
 - Suggest a fix that matches the root cause, such as server side authorization, output encoding, or a strict allowlist, rather than a filter on one payload.
 
+## Write a report that gets triaged fast
+
+- Read this section before you write a bounty report, and again after you finish the test run. It is the user's standing rule for reports (added 2026-11-18): a clear report plus strong proof plus real impact means faster triage and a better chance at a bounty.
+- Before you write, check and do all of these: read the program scope and rules and confirm the bug is in scope; check disclosed reports and the changelog for duplicates; test safely on your own account, never touch another user data, and avoid denial of service; re-verify the finding and rule out a false positive.
+- Structure every report like this: 1. Title — specific: bug class plus location plus impact. Wrong: "XSS on the website". Right: "Stored XSS in the comment field at /posts/{id} allows session takeover". 2. Summary — two or three sentences: what the bug is, where it is, what it causes. 3. Severity — propose Low, Medium, High, or Critical, ideally with a CVSS score and the reason. Do not inflate it; your credibility is at stake. 4. Reproduction steps — the most important part. A stranger must be able to follow them from zero: URL, parameters, HTTP method, account and role, full payload or request, plus browser and version. 5. Proof of concept — screenshots, a short video, or a minimal script. Redact sensitive data. Prove the impact without causing damage. 6. Impact — realistic scenarios only: who is affected, what data is reachable, what an attacker can do. Do not speculate wildly. 7. Fix recommendation — short: input validation, output encoding, server-side authorization checks, rate limiting. Optional, but teams like it. 8. Extra info — test environment, date and time, CWE or OWASP references.
+- Acceptance tips: one report per bug, unless it is a chain and you explain the chain; professional and neutral language, do not demand or mention the bounty up front; frame the business impact (account takeover, data leak, remote code execution usually score highest); always include repeatable proof; stop once the proof is enough, do not exploit further; answer clarifications fast and politely; follow the disclosure policy and do not publish before you are allowed to.
+- Common mistakes that get reports rejected: a title that is too generic; ambiguous reproduction steps; reporting scanner output without verification; inflated severity; reporting out-of-scope or known issues; spamming duplicate or low-quality reports.
+- Short template: Title: [Bug] in [component] allows [impact]. Then Summary, Severity (CVSS), Reproduction steps, PoC, Impact, Recommendation, Environment.
+
 ## Available connectors
 
 - Use `muse.connector_search` to find other connectors and `muse.skill_search` to find related skills.

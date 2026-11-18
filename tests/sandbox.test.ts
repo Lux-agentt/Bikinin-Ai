@@ -13,7 +13,14 @@
 //    ON PURPOSE, so each test proves what the sandbox layer itself stops.
 //    A test comment names the layer that stopped the exploit.
 import { execFileSync } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -21,6 +28,7 @@ import { AgentError } from "../src/errors.js";
 import { classifyCommand } from "../src/safety/commands.js";
 import {
   execSandboxed,
+  isInstallCommand,
   safeEnv,
   sandboxEnabled,
 } from "../src/tools/run-command.js";
@@ -173,6 +181,71 @@ describe("sandbox (Fase 8): pola baru harus block", () => {
 
   it("tidak memblokir nama file yang mirip (cat nc.txt)", () => {
     expect(classifyCommand("cat nc.txt").decision).toBe("allow");
+  });
+});
+
+describe("isInstallCommand (Fase 9)", () => {
+  it.each([
+    "npm install",
+    "npm ci",
+    "npm i",
+    "npm install react",
+    "npm install --no-audit --no-fund",
+    "npm ci --ignore-scripts",
+    "npm i lodash@4.17.21",
+    "pnpm install",
+    "pnpm i",
+    "yarn install",
+    "  npm install  ",
+  ])("matches %s", (cmd) => {
+    expect(isInstallCommand(cmd)).toBe(true);
+  });
+
+  it.each([
+    "npm run build",
+    "npm test",
+    "npm --version",
+    "npm publish",
+    "npm init",
+    "npm uninstall lodash",
+    // Majemuk: tetap sandboxed, model harus memecahnya jadi dua panggilan.
+    "npm install && npm run build",
+    "npm ci; npm test",
+    "npm install | tee log.txt",
+    "echo npm install",
+    "node install.js",
+  ])("does not match %s", (cmd) => {
+    expect(isInstallCommand(cmd)).toBe(false);
+  });
+});
+
+describe("sandbox (Fase 9): install tetap confirm, pola berbahaya tetap block", () => {
+  it.each([
+    "npm ci",
+    "npm ci --ignore-scripts",
+    "npm install react",
+    "npm install --no-audit --no-fund",
+    "npm i lodash",
+    "pnpm install",
+    "yarn install",
+  ])("asks for confirmation on %s", (cmd) => {
+    expect(classifyCommand(cmd).decision).toBe("confirm");
+  });
+
+  it("tetap memblokir pola berbahaya di perintah install", () => {
+    expect(classifyCommand("npm install $(rm -rf /)").decision).toBe("block");
+    expect(classifyCommand("npm install /etc/passwd").decision).toBe("block");
+    expect(classifyCommand("npm install ../evil").decision).toBe("block");
+  });
+
+  it("flag --registry tidak diblokir classifier (kontrolnya: approval pengguna)", () => {
+    // --registry mengarahkan npm ke registry lain; classifier tidak
+    // mengenalinya sebagai pola berbahaya, jadi verdict-nya confirm dan
+    // pengguna melihat flag itu di teks perintah sebelum menyetujui.
+    // Lihat docs/sandbox-limits.md (Fase 9).
+    expect(
+      classifyCommand("npm install --registry https://evil.example").decision,
+    ).toBe("confirm");
   });
 });
 
@@ -418,6 +491,62 @@ describe.skipIf(!SANDBOX_AVAILABLE)("sandbox: unshare (live)", () => {
     }
   });
 
+  it("perintah install jalan di luar sandbox (fake npm di /tmp terlihat)", async () => {
+    // Shim npm di bawah /tmp: di dalam sandbox /tmp ditutup tmpfs kosong,
+    // jadi shim hanya bisa jalan bila perintah install memang lewat
+    // execShell (Fase 9), bukan lewat execSandboxed.
+    const shimDir = await mkdtemp(join(tmpdir(), "bikinin-npm-shim-"));
+    const shim = join(shimDir, "npm");
+    await writeFile(
+      shim,
+      '#!/bin/sh\necho "FAKE-NPM $@" >> "$PWD/fake-npm-marker.txt"\necho "fake-npm 0.0.0"\n',
+    );
+    await chmod(shim, 0o755);
+    const prevPath = process.env.PATH;
+    process.env.PATH = `${shimDir}:${prevPath ?? ""}`;
+    try {
+      const ws = await tempWorkspace();
+      const r = await runTool("run_command", { command: "npm install" }, ws);
+      expect(r.ok).toBe(true);
+      expect(
+        await readFile(join(ws, "fake-npm-marker.txt"), "utf8"),
+      ).toContain("FAKE-NPM install");
+    } finally {
+      if (prevPath === undefined) delete process.env.PATH;
+      else process.env.PATH = prevPath;
+    }
+  });
+
+  it("perintah non-install tetap sandboxed (fake npm di /tmp tidak terlihat)", async () => {
+    const shimDir = await mkdtemp(join(tmpdir(), "bikinin-npm-shim-"));
+    const shim = join(shimDir, "npm");
+    await writeFile(
+      shim,
+      '#!/bin/sh\necho "FAKE-NPM $@" >> "$PWD/fake-npm-marker.txt"\necho "fake-npm 0.0.0"\n',
+    );
+    await chmod(shim, 0o755);
+    const prevPath = process.env.PATH;
+    process.env.PATH = `${shimDir}:${prevPath ?? ""}`;
+    try {
+      const ws = await tempWorkspace();
+      const r = await runTool(
+        "run_command",
+        { command: "npm --version" },
+        ws,
+      );
+      expect(r.ok).toBe(true);
+      // Yang jalan adalah npm asli (versi angka), bukan shim.
+      expect(r.output).toMatch(/\d+\.\d+\.\d+/);
+      expect(r.output).not.toContain("fake-npm");
+      await expect(
+        readFile(join(ws, "fake-npm-marker.txt"), "utf8"),
+      ).rejects.toThrow();
+    } finally {
+      if (prevPath === undefined) delete process.env.PATH;
+      else process.env.PATH = prevPath;
+    }
+  });
+
   it("BIKININ_SANDBOX=off menjalankan perintah langsung tanpa sandbox", async () => {
     const ws = await tempWorkspace();
     const prev = process.env.BIKININ_SANDBOX;
@@ -431,4 +560,102 @@ describe.skipIf(!SANDBOX_AVAILABLE)("sandbox: unshare (live)", () => {
       else process.env.BIKININ_SANDBOX = prev;
     }
   });
+});
+
+/* ---------- Fase 9: install dependensi nyata (offline, dep file:) ---------- */
+
+// Probe seperti sandbox di atas: bila mesin ini tidak punya npm, test
+// install nyata di-skip (bukan lolos diam-diam). Test ini tidak butuh
+// sandbox dan tidak butuh internet — dependensi berupa tarball lokal
+// (file:), jadi tidak ada yang mengambil apa pun dari registry.
+function probeNpmAvailable(): boolean {
+  try {
+    execFileSync("npm", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const NPM_AVAILABLE = probeNpmAvailable();
+
+describe.skipIf(!NPM_AVAILABLE)("sandbox (Fase 9): install nyata tanpa internet", () => {
+  async function fixtureTarball(): Promise<{ dir: string; tgz: string }> {
+    const dir = await mkdtemp(join(tmpdir(), "bikinin-fx-"));
+    const pkgDir = join(dir, "fixture-pkg");
+    await mkdir(pkgDir);
+    await writeFile(
+      join(pkgDir, "package.json"),
+      JSON.stringify({
+        name: "bikinin-test-pkg",
+        version: "1.0.0",
+        main: "index.js",
+      }),
+    );
+    await writeFile(join(pkgDir, "index.js"), "module.exports = 42;\n");
+    // npm pack hanya mengarsip direktori lokal — tanpa network.
+    execFileSync("npm", ["pack", "--silent"], {
+      cwd: pkgDir,
+      stdio: "ignore",
+    });
+    return { dir, tgz: join(pkgDir, "bikinin-test-pkg-1.0.0.tgz") };
+  }
+
+  async function workspaceWithFileDep(tgz: string): Promise<string> {
+    const ws = await tempWorkspace();
+    await writeFile(
+      join(ws, "package.json"),
+      JSON.stringify({
+        name: "ws",
+        version: "1.0.0",
+        dependencies: { "bikinin-test-pkg": `file:${tgz}` },
+      }),
+    );
+    return ws;
+  }
+
+  it("npm install nyata memasang dep file: lewat tool", async () => {
+    const { tgz } = await fixtureTarball();
+    const ws = await workspaceWithFileDep(tgz);
+    const r = await runTool(
+      "run_command",
+      { command: "npm install --no-audit --no-fund" },
+      ws,
+    );
+    expect(r.ok).toBe(true);
+    const installed = JSON.parse(
+      await readFile(
+        join(ws, "node_modules/bikinin-test-pkg/package.json"),
+        "utf8",
+      ),
+    );
+    expect(installed.version).toBe("1.0.0");
+    expect(
+      await readFile(join(ws, "node_modules/bikinin-test-pkg/index.js"), "utf8"),
+    ).toContain("module.exports = 42");
+  }, 30_000);
+
+  it("npm ci nyata memasang dari lockfile lewat tool", async () => {
+    const { tgz } = await fixtureTarball();
+    const ws = await workspaceWithFileDep(tgz);
+    // Lockfile dibuat sekali di setup (offline, dep file: saja).
+    execFileSync(
+      "npm",
+      ["install", "--package-lock-only", "--no-audit", "--no-fund"],
+      { cwd: ws, stdio: "ignore" },
+    );
+    const r = await runTool(
+      "run_command",
+      { command: "npm ci --no-audit --no-fund" },
+      ws,
+    );
+    expect(r.ok).toBe(true);
+    const installed = JSON.parse(
+      await readFile(
+        join(ws, "node_modules/bikinin-test-pkg/package.json"),
+        "utf8",
+      ),
+    );
+    expect(installed.version).toBe("1.0.0");
+  }, 30_000);
 });
