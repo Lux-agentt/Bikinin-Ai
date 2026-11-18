@@ -244,7 +244,7 @@ if (cmd === "tambah" && item) {
     category: "research",
     title: "Cari harga domain .id terbaru",
     prompt:
-      "Cari harga domain .id terbaru dari hasil pencarian dan ringkas dalam 3 poin.",
+      "Gunakan tool web_search untuk mencari harga domain .id terbaru, lalu ringkas hasilnya dalam 3 poin.",
     requiresNetwork: true,
     check: (ctx) => {
       const searched = ctx.events.some(

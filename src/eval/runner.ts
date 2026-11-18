@@ -63,7 +63,11 @@ export interface RunEvalOptions {
   only?: string[];
   /** Skip network tasks (dummy mode). Default true when mode === "dummy". */
   skipNetwork?: boolean;
+  /** Wait before retrying a rate-limited (429) task once. Default 60_000 ms. */
+  retryDelayMs?: number;
 }
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 const slug = (s: string) => s.replace(/[^a-zA-Z0-9]+/g, "-").slice(0, 40);
 
@@ -119,6 +123,24 @@ export async function runEvalTask(
       outputTokens: 0,
       costUsd: 0,
       durationMs: Date.now() - started,
+    };
+  }
+
+  // Run yang error (mis. rate limit) jangan dinilai oleh check tugas:
+  // alasan gagalnya adalah error itu sendiri, bukan verdict check.
+  if (result.status === "error") {
+    return {
+      id: task.id,
+      category: task.category,
+      title: task.title,
+      status: "fail",
+      details: result.summary || "agent error",
+      agentStatus: result.status,
+      steps: result.totals.steps,
+      inputTokens: result.totals.input_tokens,
+      outputTokens: result.totals.output_tokens,
+      costUsd: result.totals.cost_usd,
+      durationMs: result.durationMs,
     };
   }
 
@@ -180,22 +202,28 @@ export async function runEvalSuite(opts: RunEvalOptions): Promise<{
       });
       continue;
     }
-    const llm =
-      opts.mode === "dummy"
-        ? createDummyLlm(planFirstScript(task))
-        : opts.llmFor(task);
-    results.push(
-      await runEvalTask(task, {
+    const runOnce = () =>
+      runEvalTask(task, {
         workspaceRoot: opts.workspaceRoot,
         systemPrompt: opts.systemPrompt,
-        llm,
+        llm:
+          opts.mode === "dummy"
+            ? createDummyLlm(planFirstScript(task))
+            : opts.llmFor(task),
         modelLabel: opts.modelLabel,
         maxSteps: opts.maxSteps ?? 30,
         maxCostUsd: opts.maxCostUsd ?? 0.5,
         prices: opts.prices ?? { inPerM: 0, outPerM: 0 },
         runDir,
-      }),
-    );
+      });
+    let taskResult = await runOnce();
+    // Rate limit sesaat (429) bukan kegagalan tugas: tunggu sekali lalu
+    // coba ulang satu kali, supaya jendela limit sempat reset.
+    if (taskResult.status === "fail" && /429|rate limit/i.test(taskResult.details)) {
+      await sleep(opts.retryDelayMs ?? 60_000);
+      taskResult = await runOnce();
+    }
+    results.push(taskResult);
   }
 
   const attempted = results.filter((r) => r.status !== "skip");
@@ -223,7 +251,10 @@ export async function runEvalSuite(opts: RunEvalOptions): Promise<{
     results,
   };
 
-  const logPath = join(outDir, `${date}.json`);
+  // Satu file per run (tanggal + jam mulai), bukan satu file per hari:
+  // dua run di hari yang sama sebelumnya saling menimpa.
+  const time = startedAt.slice(11, 23).replace(/[:.]/g, "");
+  const logPath = join(outDir, `${date}-${time}.json`);
   await writeFile(logPath, JSON.stringify(report, null, 2) + "\n", "utf8");
   return { report, logPath };
 }

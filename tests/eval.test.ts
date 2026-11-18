@@ -11,8 +11,9 @@ import {
   type CheckContext,
 } from "../src/eval/checks.js";
 import { createDummyLlm } from "../src/eval/dummy.js";
-import { runEvalTask } from "../src/eval/runner.js";
+import { runEvalSuite, runEvalTask } from "../src/eval/runner.js";
 import { getTask, planFirstScript, TASKS } from "../src/eval/tasks.js";
+import type { LlmClient } from "../src/llm/client.js";
 import { tempWorkspace } from "./helpers.js";
 
 function ctxWith(
@@ -240,5 +241,61 @@ describe("task checkers on real files", () => {
     const out = await task.check(ctxWith([], "", { workspace: ws }));
     expect(out.passed).toBe(true);
     expect(await readFile(join(ws, "salinan.txt"), "utf8")).toBe(content);
+  });
+});
+
+describe("suite log + rate-limit retry", () => {
+  it("two runs on the same day write two different log files", async () => {
+    const ws = await tempWorkspace();
+    const outDir = join(ws, "logs");
+    const opts = {
+      workspaceRoot: ws,
+      systemPrompt: "sys",
+      llmFor: () => createDummyLlm([]),
+      modelLabel: "dummy",
+      mode: "dummy" as const,
+      only: ["bugfix-off-by-one"],
+      outDir,
+    };
+    const first = await runEvalSuite(opts);
+    const second = await runEvalSuite(opts);
+    expect(first.logPath).not.toBe(second.logPath);
+    expect(await readFile(first.logPath, "utf8")).toContain("bugfix-off-by-one");
+    expect(await readFile(second.logPath, "utf8")).toContain("bugfix-off-by-one");
+  });
+
+  it("rate-limited task is retried once and passes", async () => {
+    const ws = await tempWorkspace();
+    const task = getTask("bugfix-off-by-one");
+    if (!task) throw new Error("no task bugfix-off-by-one");
+    let calls = 0;
+    const llmFor = (): LlmClient => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          chat: async () => {
+            throw new Error("Kena rate limit penyedia (429)");
+          },
+        };
+      }
+      return createDummyLlm(planFirstScript(task));
+    };
+    const { report } = await runEvalSuite({
+      workspaceRoot: ws,
+      systemPrompt: "sys",
+      llmFor,
+      modelLabel: "live-test",
+      mode: "live",
+      only: ["bugfix-off-by-one"],
+      retryDelayMs: 0,
+    });
+    expect(calls).toBe(2);
+    expect(report.results[0]?.status).toBe("pass");
+  });
+
+  it("research-web prompt names web_search explicitly", () => {
+    const task = getTask("research-web");
+    if (!task) throw new Error("no task research-web");
+    expect(task.prompt).toContain("web_search");
   });
 });

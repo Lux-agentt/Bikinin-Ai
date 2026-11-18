@@ -4,7 +4,7 @@
 // verifies the harness. Live mode: `--model <nama-provider>` uses that
 // provider from .env (fallback chain NOT used: one provider per run).
 // Network tasks are skipped honestly in dummy mode, never faked.
-// Logs go to <workspace>/.bikinin/evals/<tanggal>.json (outside the repo).
+// Logs go to <workspace>/.bikinin/evals/<tanggal>-<jam>.json (one file per run, outside the repo).
 //
 //   npm run eval                          # dummy, all tasks
 //   npm run eval -- --model or-north      # live, one provider
