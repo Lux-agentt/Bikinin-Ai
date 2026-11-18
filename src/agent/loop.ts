@@ -865,7 +865,9 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
 
       messages.push({
         role: "assistant",
-        content: res.text || null,
+        // Empty string, not null: some OpenAI-compatible endpoints
+        // (Gemini) reject a tool-call message with null content.
+        content: res.text || "",
         tool_calls: res.toolCalls,
       });
       const { outputs, stopReason } = await runToolCalls(res.toolCalls);

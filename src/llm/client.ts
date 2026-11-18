@@ -101,6 +101,15 @@ export interface LlmOptions {
 const defaultSleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** Provider's own error detail, truncated — a bare status makes 400s
+ *  undiagnosable (live eval Gemini 2026-11-18: the first request was
+ *  accepted, a later one 400'd, and the body was discarded). */
+function providerDetail(err: APIError): string {
+  const msg = typeof err.message === "string" ? err.message.trim() : "";
+  if (!msg) return "";
+  return msg.length > 300 ? `${msg.slice(0, 300)}…` : msg;
+}
+
 function classify(err: unknown): { retryable: boolean; error: AgentError } {
   if (err instanceof APIUserAbortError) {
     return {
@@ -121,12 +130,15 @@ function classify(err: unknown): { retryable: boolean; error: AgentError } {
   }
   if (err instanceof APIError) {
     const status = err.status;
+    const detail = providerDetail(err);
+    const withDetail = (base: string) =>
+      detail ? `${base}: ${detail}` : base;
     if (status === 429) {
       return {
         retryable: true,
         error: new AgentError(
           "rate_limited",
-          "Kena rate limit penyedia (429)",
+          withDetail("Kena rate limit penyedia (429)"),
           true,
           true,
         ),
@@ -137,7 +149,7 @@ function classify(err: unknown): { retryable: boolean; error: AgentError } {
         retryable: false,
         error: new AgentError(
           "provider_error",
-          "Saldo atau kuota penyedia habis (402)",
+          withDetail("Saldo atau kuota penyedia habis (402)"),
           false,
           true,
         ),
@@ -148,7 +160,7 @@ function classify(err: unknown): { retryable: boolean; error: AgentError } {
         retryable: true,
         error: new AgentError(
           "provider_error",
-          `Penyedia error ${status}`,
+          withDetail(`Penyedia error ${status}`),
           true,
           true,
         ),
@@ -158,7 +170,7 @@ function classify(err: unknown): { retryable: boolean; error: AgentError } {
       retryable: false,
       error: new AgentError(
         "provider_error",
-        `Penyedia menolak request (${status ?? "tanpa status"})`,
+        withDetail(`Penyedia menolak request (${status ?? "tanpa status"})`),
       ),
     };
   }

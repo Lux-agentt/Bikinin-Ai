@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runAgent, type AgentDeps } from "../src/agent/loop.js";
@@ -7,7 +7,12 @@ import {
   type AgentEvent,
   type EventType,
 } from "../src/events.js";
-import type { ChatResult, LlmClient, ToolCallReq } from "../src/llm/client.js";
+import type {
+  ChatMessage,
+  ChatResult,
+  LlmClient,
+  ToolCallReq,
+} from "../src/llm/client.js";
 import { tempWorkspace } from "./helpers.js";
 
 const usage = { input_tokens: 100, output_tokens: 20, cached_tokens: 0 };
@@ -217,5 +222,45 @@ describe("agent loop event contract", () => {
       ofType(events, "tool_call_finished").at(-1)?.summary,
     ).toContain("diblokir");
     expectWellFormed(events);
+  });
+
+  it("assistant message with tool_calls carries empty-string content", async () => {
+    // Gemini's OpenAI-compatible endpoint rejects a tool-call message
+    // with null content; empty string is accepted everywhere.
+    const workspace = await tempWorkspace();
+    await writeFile(join(workspace, "a.txt"), "hello\n", "utf8");
+    const seen: ChatMessage[][] = [];
+    let n = 0;
+    const llm: LlmClient = {
+      async chat(p) {
+        seen.push(p.messages);
+        n += 1;
+        if (n === 1) return withCalls(plan("t0"));
+        if (n === 2)
+          return withCalls(call("t1", "read_file", { path: "a.txt" }));
+        return finalText("Selesai.");
+      },
+    };
+    const events: AgentEvent[] = [];
+    const emit = createEmitter("run_test", (e) => events.push(e));
+    const result = await runAgent({
+      llm,
+      model: "test-model",
+      systemPrompt: "sys",
+      message: "baca a.txt",
+      sessionId: "s_test",
+      workspace,
+      limits: { maxSteps: 10, maxCostUsd: 1 },
+      prices: { inPerM: 1, outPerM: 2 },
+      emit,
+      approve: async () => false,
+    });
+    expect(result.status).toBe("completed");
+    const second = seen[1] ?? [];
+    const asst = second.find(
+      (m) => m.role === "assistant" && "tool_calls" in m && m.tool_calls,
+    );
+    expect(asst).toBeDefined();
+    expect((asst as { content: unknown }).content).toBe("");
   });
 });
