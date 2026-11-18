@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
 import {
   createOpenAiLlm,
-  echoToolCalls,
+  echoAssistantMessage,
   type ChatMessage,
 } from "../src/llm/client.js";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
@@ -90,7 +90,7 @@ const readFileTool: ChatCompletionTool = {
   },
 };
 
-const toolCallChunk = (sig: string) =>
+const toolCallChunk = (sig: string, msgSig = "sig-msg") =>
   JSON.stringify({
     id: "chatcmpl-test",
     object: "chat.completion.chunk",
@@ -111,6 +111,7 @@ const toolCallChunk = (sig: string) =>
               extra_content: { google: { thought_signature: sig } },
             },
           ],
+          extra_content: { google: { thought_signature: msgSig } },
         },
         finish_reason: null,
       },
@@ -176,7 +177,10 @@ async function withSseServer(
 type CapturedBody = {
   messages: Array<{
     role?: string;
-    tool_calls?: Array<Record<string, unknown>>;
+    extra_content?: { google?: { thought_signature?: string } };
+    tool_calls?: Array<{
+      extra_content?: { google?: { thought_signature?: string } };
+    }>;
   }>;
 };
 
@@ -202,6 +206,28 @@ describe("Gemini thought signature round-trip", () => {
     );
   });
 
+  it("captures the turn-level signature from a message delta", async () => {
+    await withSseServer(
+      [[toolCallChunk("sig-abc", "sig-msg"), finishChunk("tool_calls")]],
+      "/v1",
+      async (bodies, baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const r = await llm.chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "baca a.txt" }],
+          tools: [readFileTool],
+        });
+        expect(r.toolCalls[0]?.thoughtSignature).toBe("sig-abc");
+        expect(r.messageThoughtSignature).toBe("sig-msg");
+        expect(bodies).toHaveLength(1);
+      },
+    );
+  });
+
   it("strips extra_content when echoing to a non-Gemini provider", async () => {
     await withSseServer(
       [
@@ -221,19 +247,18 @@ describe("Gemini thought signature round-trip", () => {
           tools: [readFileTool],
         });
         expect(first.toolCalls[0]?.thoughtSignature).toBe("sig-abc");
+        expect(first.messageThoughtSignature).toBe("sig-msg");
         const messages: ChatMessage[] = [
           { role: "user", content: "baca a.txt" },
-          {
-            role: "assistant",
-            content: "",
-            tool_calls: echoToolCalls(first.toolCalls),
-          },
+          echoAssistantMessage(first),
           { role: "tool", tool_call_id: "call_1", content: "hello\n" },
         ];
         await llm.chat({ model: "test-model", messages, tools: [] });
         expect(bodies).toHaveLength(2);
         const second = bodies[1] as CapturedBody;
-        const tc = second.messages[1]?.tool_calls?.[0] ?? {};
+        const asst = second.messages[1] ?? {};
+        expect(asst).not.toHaveProperty("extra_content");
+        const tc = asst.tool_calls?.[0] ?? {};
         expect(tc).not.toHaveProperty("extra_content");
       },
     );
@@ -259,21 +284,16 @@ describe("Gemini thought signature round-trip", () => {
         });
         const messages: ChatMessage[] = [
           { role: "user", content: "baca a.txt" },
-          {
-            role: "assistant",
-            content: "",
-            tool_calls: echoToolCalls(first.toolCalls),
-          },
+          echoAssistantMessage(first),
           { role: "tool", tool_call_id: "call_1", content: "hello\n" },
         ];
         await llm.chat({ model: "test-model", messages, tools: [] });
         expect(bodies).toHaveLength(2);
         const second = bodies[1] as CapturedBody;
-        const tc = second.messages[1]?.tool_calls?.[0] ?? {};
-        expect(
-          (tc.extra_content as { google?: { thought_signature?: string } })
-            ?.google?.thought_signature,
-        ).toBe("sig-abc");
+        const asst = second.messages[1] ?? {};
+        expect(asst.extra_content?.google?.thought_signature).toBe("sig-msg");
+        const tc = asst.tool_calls?.[0] ?? {};
+        expect(tc.extra_content?.google?.thought_signature).toBe("sig-abc");
       },
     );
   });

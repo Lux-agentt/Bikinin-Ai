@@ -55,6 +55,13 @@ export interface ChatResult {
   costUsd?: number;
   provider?: string;
   model?: string;
+  /**
+   * Opaque Gemini thought signature for THIS turn's text, carried on the
+   * assistant message itself (extra_content.google.thought_signature). A
+   * turn that mixes text and tool calls 400s on the next request without
+   * it. Never logged, never branched on — only round-tripped.
+   */
+  messageThoughtSignature?: string;
 }
 
 export interface VisionRequest {
@@ -118,7 +125,10 @@ function providerDetail(err: APIError): string {
   return msg.length > 300 ? `${msg.slice(0, 300)}…` : msg;
 }
 
-function classify(err: unknown): { retryable: boolean; error: AgentError } {
+function classify(
+  err: unknown,
+  shape?: string,
+): { retryable: boolean; error: AgentError } {
   if (err instanceof APIUserAbortError) {
     return {
       retryable: false,
@@ -178,7 +188,8 @@ function classify(err: unknown): { retryable: boolean; error: AgentError } {
       retryable: false,
       error: new AgentError(
         "provider_error",
-        withDetail(`Penyedia menolak request (${status ?? "tanpa status"})`),
+        withDetail(`Penyedia menolak request (${status ?? "tanpa status"})`) +
+          (shape ? ` | riwayat: ${shape}` : ""),
       ),
     };
   }
@@ -240,27 +251,70 @@ export function echoToolCalls(
   }) as ChatCompletionMessageToolCall[];
 }
 
+/**
+ * The assistant message as echoed back in history. Besides the tool-call
+ * signatures (see echoToolCalls), a thinking model's TEXT also carries a
+ * signature — on the message itself. A turn that mixes text and tool calls
+ * 400s on the next request without it (live eval Gemini 2026-11-18:
+ * edge-missing-file, edge-unicode — the provider only says "Request
+ * contains an invalid argument", so the shape, not the message, pointed
+ * at the missing turn signature).
+ */
+export function echoAssistantMessage(res: ChatResult): ChatMessage {
+  const msg: ChatMessage = {
+    role: "assistant",
+    content: res.text || "",
+    tool_calls: echoToolCalls(res.toolCalls),
+  };
+  if (!res.messageThoughtSignature) return msg;
+  return {
+    ...msg,
+    extra_content: { google: { thought_signature: res.messageThoughtSignature } },
+  } as ChatMessage;
+}
+
 function isGeminiBaseUrl(baseURL: string): boolean {
   return baseURL.includes("generativelanguage.googleapis.com");
 }
 
+/** Compact shape of the outgoing history, attached to generic 400s so the
+ *  eval log can say WHICH turn was invalid (the provider only says
+ *  "Request contains an invalid argument"). Structure only, no content. */
+function shapeSummary(messages: ChatMessage[]): string {
+  return messages
+    .map((m) => {
+      if (m.role === "assistant" && "tool_calls" in m && m.tool_calls) {
+        const sigs = m.tool_calls.filter(
+          (tc) => "extra_content" in (tc as unknown as Record<string, unknown>),
+        ).length;
+        const hasText =
+          typeof m.content === "string" && m.content.length > 0;
+        const msgSig =
+          "extra_content" in (m as unknown as Record<string, unknown>) ? 1 : 0;
+        return `asst{${hasText ? "text" : "notext"},tools:${m.tool_calls.length},sig:${sigs},msgsig:${msgSig}}`;
+      }
+      return m.role;
+    })
+    .join(",");
+}
+
 /**
- * Drop provider-opaque fields from echoed tool calls when talking to a
- * non-Gemini provider — strict providers reject requests carrying
+ * Drop provider-opaque fields from echoed assistant messages when talking
+ * to a non-Gemini provider — strict providers reject requests carrying
  * extra_content. Gemini requests pass through untouched.
  */
 function stripForeignExtraContent(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((m) => {
     if (m.role !== "assistant" || !("tool_calls" in m) || !m.tool_calls)
       return m;
-    return {
-      ...m,
-      tool_calls: m.tool_calls.map((tc) =>
-        tc.type === "function"
-          ? { id: tc.id, type: "function" as const, function: tc.function }
-          : tc,
-      ),
-    };
+    const copy = { ...m } as unknown as Record<string, unknown>;
+    delete copy.extra_content;
+    copy.tool_calls = m.tool_calls.map((tc) =>
+      tc.type === "function"
+        ? { id: tc.id, type: "function" as const, function: tc.function }
+        : tc,
+    );
+    return copy as unknown as ChatMessage;
   });
 }
 
@@ -312,6 +366,9 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
           );
 
           let text = "";
+          // Turn-level thought signature, if the model attached one to
+          // this response's text (see ChatResult.messageThoughtSignature).
+          let messageThoughtSignature: string | undefined;
           let usage: Usage = {
             input_tokens: 0,
             output_tokens: 0,
@@ -338,6 +395,10 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
               text += delta.content;
               p.onText?.(delta.content);
             }
+            // A thinking model signs the text turn itself too; the
+            // signature rides on the message delta's extra_content.
+            const msgSig = readThoughtSignature(delta);
+            if (msgSig) messageThoughtSignature = msgSig;
             for (const tc of delta.tool_calls ?? []) {
               const slot = partial.get(tc.index) ?? {
                 id: "",
@@ -365,10 +426,15 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
                 : {}),
             }));
 
-          return { text, toolCalls, usage };
+          return {
+            text,
+            toolCalls,
+            usage,
+            ...(messageThoughtSignature ? { messageThoughtSignature } : {}),
+          };
         } catch (err) {
           if (p.signal?.aborted) throw err;
-          const { retryable, error } = classify(err);
+          const { retryable, error } = classify(err, shapeSummary(p.messages));
           // Only retry when nothing was streamed yet, so text is never duplicated.
           if (retryable && !received && attempt < maxRetries) {
             await sleep(1000 * 2 ** attempt);

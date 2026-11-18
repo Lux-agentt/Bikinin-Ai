@@ -325,4 +325,66 @@ describe("agent loop event contract", () => {
       | undefined;
     expect(tc?.extra_content?.google?.thought_signature).toBe("sig-xyz");
   });
+
+  it("echoes a text turn's thought signature on the assistant message", async () => {
+    // A turn that mixes text and a tool call carries its signature on the
+    // message itself; without it Gemini 400s the next request (edge
+    // tasks, live eval 2026-11-18).
+    const workspace = await tempWorkspace();
+    await writeFile(join(workspace, "a.txt"), "hello\n", "utf8");
+    const seen: ChatMessage[][] = [];
+    let n = 0;
+    const llm: LlmClient = {
+      async chat(p) {
+        seen.push(p.messages);
+        n += 1;
+        if (n === 1) return withCalls(plan("t0"));
+        if (n === 2)
+          return {
+            text: "Saya cek dulu isinya.",
+            toolCalls: [
+              call("t1", "read_file", { path: "a.txt" }),
+            ],
+            usage,
+            messageThoughtSignature: "sig-teks",
+          };
+        return finalText("Selesai.");
+      },
+    };
+    const events: AgentEvent[] = [];
+    const emit = createEmitter("run_test", (e) => events.push(e));
+    const result = await runAgent({
+      llm,
+      model: "test-model",
+      systemPrompt: "sys",
+      message: "baca a.txt",
+      sessionId: "s_test",
+      workspace,
+      limits: { maxSteps: 10, maxCostUsd: 1 },
+      prices: { inPerM: 1, outPerM: 2 },
+      emit,
+      approve: async () => false,
+    });
+    expect(result.status).toBe("completed");
+    const third = seen[2] ?? [];
+    const asst = third.find(
+      (m) =>
+        m.role === "assistant" &&
+        "tool_calls" in m &&
+        m.tool_calls?.some(
+          (tc) =>
+            tc.type === "function" && tc.function.name === "read_file",
+        ),
+    );
+    expect(asst).toBeDefined();
+    expect((asst as { content: unknown }).content).toBe(
+      "Saya cek dulu isinya.",
+    );
+    const msgSig = (
+      asst as {
+        extra_content?: { google?: { thought_signature?: string } };
+      }
+    ).extra_content?.google?.thought_signature;
+    expect(msgSig).toBe("sig-teks");
+  });
 });

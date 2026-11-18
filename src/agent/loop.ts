@@ -12,7 +12,7 @@ import type {
   VisionRequest,
   VisionResult,
 } from "../llm/client.js";
-import { echoToolCalls } from "../llm/client.js";
+import { echoAssistantMessage } from "../llm/client.js";
 import { costUsd, type Prices } from "../llm/pricing.js";
 import { Budget } from "../safety/budget.js";
 import { resolveInWorkspace } from "../safety/paths.js";
@@ -864,15 +864,11 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         continue;
       }
 
-      messages.push({
-        role: "assistant",
-        // Empty string, not null: some OpenAI-compatible endpoints
-        // (Gemini) reject a tool-call message with null content.
-        // echoToolCalls re-attaches any provider-opaque fields (Gemini
-        // thought signature) the model issued with the call.
-        content: res.text || "",
-        tool_calls: echoToolCalls(res.toolCalls),
-      });
+      // echoAssistantMessage re-attaches any provider-opaque fields
+      // (Gemini thought signatures, per tool call and per text turn) the
+      // model issued with this response; empty-string content, not null,
+      // because some OpenAI-compatible endpoints reject null content.
+      messages.push(echoAssistantMessage(res));
       const { outputs, stopReason } = await runToolCalls(res.toolCalls);
       for (const o of outputs) {
         messages.push({ role: "tool", tool_call_id: o.id, content: o.content });
