@@ -12,6 +12,7 @@ import type {
   VisionRequest,
   VisionResult,
 } from "../llm/client.js";
+import { echoToolCalls } from "../llm/client.js";
 import { costUsd, type Prices } from "../llm/pricing.js";
 import { Budget } from "../safety/budget.js";
 import { resolveInWorkspace } from "../safety/paths.js";
@@ -867,8 +868,10 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         role: "assistant",
         // Empty string, not null: some OpenAI-compatible endpoints
         // (Gemini) reject a tool-call message with null content.
+        // echoToolCalls re-attaches any provider-opaque fields (Gemini
+        // thought signature) the model issued with the call.
         content: res.text || "",
-        tool_calls: res.toolCalls,
+        tool_calls: echoToolCalls(res.toolCalls),
       });
       const { outputs, stopReason } = await runToolCalls(res.toolCalls);
       for (const o of outputs) {

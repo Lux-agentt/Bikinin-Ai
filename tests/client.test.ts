@@ -4,7 +4,12 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { createOpenAiLlm } from "../src/llm/client.js";
+import {
+  createOpenAiLlm,
+  echoToolCalls,
+  type ChatMessage,
+} from "../src/llm/client.js";
+import type { ChatCompletionTool } from "openai/resources/chat/completions";
 
 async function withErrorServer(
   status: number,
@@ -71,6 +76,204 @@ describe("provider error detail", () => {
             tools: [],
           }),
         ).rejects.toThrow(/Bad gateway from upstream model/);
+      },
+    );
+  });
+});
+
+const readFileTool: ChatCompletionTool = {
+  type: "function",
+  function: {
+    name: "read_file",
+    description: "baca file",
+    parameters: { type: "object", properties: {} },
+  },
+};
+
+const toolCallChunk = (sig: string) =>
+  JSON.stringify({
+    id: "chatcmpl-test",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "test-model",
+    choices: [
+      {
+        index: 0,
+        delta: {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              index: 0,
+              id: "call_1",
+              type: "function",
+              function: { name: "read_file", arguments: '{"path":"a.txt"}' },
+              extra_content: { google: { thought_signature: sig } },
+            },
+          ],
+        },
+        finish_reason: null,
+      },
+    ],
+  });
+
+const finishChunk = (reason: string) =>
+  JSON.stringify({
+    id: "chatcmpl-test",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "test-model",
+    choices: [{ index: 0, delta: {}, finish_reason: reason }],
+    usage: { prompt_tokens: 10, completion_tokens: 5 },
+  });
+
+const textChunk = (text: string) =>
+  JSON.stringify({
+    id: "chatcmpl-test",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "test-model",
+    choices: [
+      {
+        index: 0,
+        delta: { role: "assistant", content: text },
+        finish_reason: null,
+      },
+    ],
+  });
+
+/** Serves one scripted SSE stream per request, capturing request bodies. */
+async function withSseServer(
+  scripts: string[][],
+  basePath: string,
+  run: (bodies: unknown[], baseURL: string) => Promise<void>,
+): Promise<void> {
+  const bodies: unknown[] = [];
+  let n = 0;
+  const server: Server = createServer((req, res) => {
+    let raw = "";
+    req.on("data", (c) => {
+      raw += c;
+    });
+    req.on("end", () => {
+      bodies.push(raw ? JSON.parse(raw) : null);
+      const chunks = scripts[Math.min(n++, scripts.length - 1)];
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      for (const c of chunks) res.write(`data: ${c}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as AddressInfo).port;
+  try {
+    await run(bodies, `http://127.0.0.1:${port}${basePath}`);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+type CapturedBody = {
+  messages: Array<{
+    role?: string;
+    tool_calls?: Array<Record<string, unknown>>;
+  }>;
+};
+
+describe("Gemini thought signature round-trip", () => {
+  it("captures the signature from a streamed tool call", async () => {
+    await withSseServer(
+      [[toolCallChunk("sig-abc"), finishChunk("tool_calls")]],
+      "/v1",
+      async (bodies, baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const r = await llm.chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "baca a.txt" }],
+          tools: [readFileTool],
+        });
+        expect(r.toolCalls[0]?.thoughtSignature).toBe("sig-abc");
+        expect(bodies).toHaveLength(1);
+      },
+    );
+  });
+
+  it("strips extra_content when echoing to a non-Gemini provider", async () => {
+    await withSseServer(
+      [
+        [toolCallChunk("sig-abc"), finishChunk("tool_calls")],
+        [textChunk("Selesai."), finishChunk("stop")],
+      ],
+      "/v1",
+      async (bodies, baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const first = await llm.chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "baca a.txt" }],
+          tools: [readFileTool],
+        });
+        expect(first.toolCalls[0]?.thoughtSignature).toBe("sig-abc");
+        const messages: ChatMessage[] = [
+          { role: "user", content: "baca a.txt" },
+          {
+            role: "assistant",
+            content: "",
+            tool_calls: echoToolCalls(first.toolCalls),
+          },
+          { role: "tool", tool_call_id: "call_1", content: "hello\n" },
+        ];
+        await llm.chat({ model: "test-model", messages, tools: [] });
+        expect(bodies).toHaveLength(2);
+        const second = bodies[1] as CapturedBody;
+        const tc = second.messages[1]?.tool_calls?.[0] ?? {};
+        expect(tc).not.toHaveProperty("extra_content");
+      },
+    );
+  });
+
+  it("keeps extra_content when echoing to Gemini", async () => {
+    await withSseServer(
+      [
+        [toolCallChunk("sig-abc"), finishChunk("tool_calls")],
+        [textChunk("Selesai."), finishChunk("stop")],
+      ],
+      "/generativelanguage.googleapis.com/v1",
+      async (bodies, baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const first = await llm.chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "baca a.txt" }],
+          tools: [readFileTool],
+        });
+        const messages: ChatMessage[] = [
+          { role: "user", content: "baca a.txt" },
+          {
+            role: "assistant",
+            content: "",
+            tool_calls: echoToolCalls(first.toolCalls),
+          },
+          { role: "tool", tool_call_id: "call_1", content: "hello\n" },
+        ];
+        await llm.chat({ model: "test-model", messages, tools: [] });
+        expect(bodies).toHaveLength(2);
+        const second = bodies[1] as CapturedBody;
+        const tc = second.messages[1]?.tool_calls?.[0] ?? {};
+        expect(
+          (tc.extra_content as { google?: { thought_signature?: string } })
+            ?.google?.thought_signature,
+        ).toBe("sig-abc");
       },
     );
   });

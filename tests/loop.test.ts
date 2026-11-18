@@ -263,4 +263,66 @@ describe("agent loop event contract", () => {
     expect(asst).toBeDefined();
     expect((asst as { content: unknown }).content).toBe("");
   });
+
+  it("echoes a Gemini thought signature back on the tool-call message", async () => {
+    const workspace = await tempWorkspace();
+    await writeFile(join(workspace, "a.txt"), "hello\n", "utf8");
+    const seen: ChatMessage[][] = [];
+    let n = 0;
+    const signedRead: ToolCallReq = {
+      id: "t1",
+      type: "function",
+      function: { name: "read_file", arguments: JSON.stringify({ path: "a.txt" }) },
+      thoughtSignature: "sig-xyz",
+    };
+    const llm: LlmClient = {
+      async chat(p) {
+        seen.push(p.messages);
+        n += 1;
+        if (n === 1) return withCalls(plan("t0"));
+        if (n === 2) return { text: "", toolCalls: [signedRead], usage };
+        return finalText("Selesai.");
+      },
+    };
+    const events: AgentEvent[] = [];
+    const emit = createEmitter("run_test", (e) => events.push(e));
+    const result = await runAgent({
+      llm,
+      model: "test-model",
+      systemPrompt: "sys",
+      message: "baca a.txt",
+      sessionId: "s_test",
+      workspace,
+      limits: { maxSteps: 10, maxCostUsd: 1 },
+      prices: { inPerM: 1, outPerM: 2 },
+      emit,
+      approve: async () => false,
+    });
+    expect(result.status).toBe("completed");
+    // Request 3 carries the signed read_file call echoed back (the plan
+    // call echoed earlier has no signature, so match by tool name).
+    const third = seen[2] ?? [];
+    const asst = third.find(
+      (m) =>
+        m.role === "assistant" &&
+        "tool_calls" in m &&
+        m.tool_calls?.some(
+          (tc) =>
+            tc.type === "function" && tc.function.name === "read_file",
+        ),
+    );
+    expect(asst).toBeDefined();
+    const tc = (
+      asst as {
+        tool_calls?: Array<Record<string, unknown>>;
+      }
+    ).tool_calls?.find(
+      (t) =>
+        (t as { function?: { name?: string } }).function?.name ===
+        "read_file",
+    ) as
+      | { extra_content?: { google?: { thought_signature?: string } } }
+      | undefined;
+    expect(tc?.extra_content?.google?.thought_signature).toBe("sig-xyz");
+  });
 });

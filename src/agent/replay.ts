@@ -1,6 +1,12 @@
 // Rebuilds a session's conversation history from its .jsonl event log
 // (Fase 1 --continue). Pure logic, no filesystem here, so it is easy to test.
 //
+// KNOWN LIMIT (Gemini): rebuilt tool-call turns carry no thought
+// signature — events never store it (opaque provider token, kept out of
+// logs by design) — so a continued Gemini run 400s on its first replayed
+// tool turn. Fresh runs are unaffected: the live loop echoes signatures
+// from the response itself (see echoToolCalls in src/llm/client.ts).
+//
 // Mapping (one run = one transcript, grouped by run_id in file order):
 // - run_started.user_message -> the run's user turn
 // - text_delta chunks -> accumulated into one assistant text turn

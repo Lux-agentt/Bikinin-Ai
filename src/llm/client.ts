@@ -7,6 +7,7 @@ import OpenAI, {
 } from "openai";
 import type {
   ChatCompletionMessageParam,
+  ChatCompletionMessageToolCall,
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
 import { AgentError } from "../errors.js";
@@ -23,6 +24,13 @@ export interface ToolCallReq {
   id: string;
   type: "function";
   function: { name: string; arguments: string };
+  /**
+   * Opaque Gemini thought signature, echoed back verbatim on the next
+   * request (Google's OpenAI-compat layer 400s a replayed function call
+   * without it). Never logged, never branched on, never asserted by
+   * value — only round-tripped. Absent for providers that don't issue one.
+   */
+  thoughtSignature?: string;
 }
 
 export interface Usage {
@@ -190,6 +198,72 @@ function isUnsupportedImageError(err: unknown): boolean {
   return /image|vision|multimodal/i.test(err.message);
 }
 
+/** Gemini thought signature from a streamed tool-call delta, if present.
+ *  Google's OpenAI-compat layer sends it as
+ *  `extra_content.google.thought_signature` (a flat `thought_signature`
+ *  is accepted too). Opaque: carried verbatim, never inspected. */
+function readThoughtSignature(tc: unknown): string | undefined {
+  if (!tc || typeof tc !== "object") return undefined;
+  const extra = (
+    tc as { extra_content?: { google?: { thought_signature?: unknown } } }
+  ).extra_content;
+  const fromExtra = extra?.google?.thought_signature;
+  if (typeof fromExtra === "string" && fromExtra) return fromExtra;
+  const flat = tc as {
+    thought_signature?: unknown;
+    thoughtSignature?: unknown;
+  };
+  if (typeof flat.thought_signature === "string" && flat.thought_signature)
+    return flat.thought_signature;
+  if (typeof flat.thoughtSignature === "string" && flat.thoughtSignature)
+    return flat.thoughtSignature;
+  return undefined;
+}
+
+/**
+ * Tool calls as echoed back in history. A Gemini-issued thought
+ * signature rides in `extra_content.google.thought_signature` — the
+ * location Google's own OpenAI-compatibility layer uses. Other
+ * providers never see it: createOpenAiLlm strips extra_content from
+ * outgoing messages unless the base URL is Gemini's.
+ */
+export function echoToolCalls(
+  calls: ToolCallReq[],
+): ChatCompletionMessageToolCall[] {
+  return calls.map((c) => {
+    const base = { id: c.id, type: "function" as const, function: c.function };
+    if (!c.thoughtSignature) return base;
+    return {
+      ...base,
+      extra_content: { google: { thought_signature: c.thoughtSignature } },
+    };
+  }) as ChatCompletionMessageToolCall[];
+}
+
+function isGeminiBaseUrl(baseURL: string): boolean {
+  return baseURL.includes("generativelanguage.googleapis.com");
+}
+
+/**
+ * Drop provider-opaque fields from echoed tool calls when talking to a
+ * non-Gemini provider — strict providers reject requests carrying
+ * extra_content. Gemini requests pass through untouched.
+ */
+function stripForeignExtraContent(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) => {
+    if (m.role !== "assistant" || !("tool_calls" in m) || !m.tool_calls)
+      return m;
+    return {
+      ...m,
+      tool_calls: m.tool_calls.map((tc) =>
+        tc.type === "function"
+          ? { id: tc.id, type: "function" as const, function: tc.function }
+          : tc,
+      ),
+    };
+  });
+}
+
 /** One vision call costs at most this long; the image plus prompt are small. */
 const VISION_TIMEOUT_MS = 60_000;
 /** Default description length cap (output tokens). */
@@ -227,7 +301,9 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
           const stream = await client.chat.completions.create(
             {
               model: p.model,
-              messages: p.messages,
+              messages: isGeminiBaseUrl(opts.baseURL)
+                ? p.messages
+                : stripForeignExtraContent(p.messages),
               ...(p.tools.length > 0 ? { tools: p.tools } : {}),
               stream: true,
               stream_options: { include_usage: true },
@@ -243,7 +319,7 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
           };
           const partial = new Map<
             number,
-            { id: string; name: string; args: string }
+            { id: string; name: string; args: string; thoughtSignature?: string }
           >();
 
           for await (const chunk of stream) {
@@ -271,6 +347,8 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
               if (tc.id) slot.id = tc.id;
               if (tc.function?.name) slot.name += tc.function.name;
               if (tc.function?.arguments) slot.args += tc.function.arguments;
+              const sig = readThoughtSignature(tc);
+              if (sig) slot.thoughtSignature = sig;
               partial.set(tc.index, slot);
             }
           }
@@ -282,6 +360,9 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
               id: s.id || `call_${i}`,
               type: "function",
               function: { name: s.name, arguments: s.args || "{}" },
+              ...(s.thoughtSignature
+                ? { thoughtSignature: s.thoughtSignature }
+                : {}),
             }));
 
           return { text, toolCalls, usage };
