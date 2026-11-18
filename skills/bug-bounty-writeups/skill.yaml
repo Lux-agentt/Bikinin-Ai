@@ -1,0 +1,5 @@
+name: "bug-bounty-writeups"
+title: "Bug Bounty Writeups"
+description: "Learn bug bounty methodology from curated writeups, build recon and test checklists by vulnerability class, and report authorized findings."
+category: "Work and knowledge"
+include_in_prompt: false

@@ -1,9 +1,12 @@
-// Tool git (Fase 6, Track D): status, diff, log, commit, branch — only inside
-// the session workspace, and only when the workspace IS a git repository.
-// Runs via execFile("git", ["-C", workspace, ...]): no shell, no free-form
-// command string. Network and destructive operations (push, fetch, pull,
-// clone, reset --hard, clean, checkout) do not exist in the op enum, so the
-// model cannot call them. Commit is local only (no push exists).
+// Tool git (Fase 6, Track D): status, diff, log, commit, branch, push —
+// only inside the session workspace, and only when the workspace IS a git
+// repository. Runs via execFile("git", ["-C", workspace, ...]): no shell,
+// no free-form command string. Network operations other than push (fetch,
+// pull, clone) and destructive operations (reset --hard, clean, checkout)
+// do not exist in the op enum, so the model cannot call them. Push sends
+// the current branch to its configured upstream only (plain `git push`, no
+// force, no remote/branch arguments) and is confirm-gated: the owner
+// approves every push in the UI/CLI. Commit stays local until pushed.
 import { execFile } from "node:child_process";
 import { access } from "node:fs/promises";
 import { join } from "node:path";
@@ -106,7 +109,7 @@ const BRANCH_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 
 const gitSchema = z
   .object({
-    op: z.enum(["status", "diff", "log", "commit", "branch"]),
+    op: z.enum(["status", "diff", "log", "commit", "branch", "push"]),
     message: z
       .string()
       .trim()
@@ -159,15 +162,15 @@ const gitSchema = z
 export const gitTool = defineTool({
   name: "git",
   description:
-    "Git di workspace sesi (status, diff, log, commit, branch). Hanya di dalam workspace dan hanya bila workspace adalah repo git. TIDAK ada push/fetch/pull/clone/reset/clean/checkout — operasi jaringan dan destruktif tidak tersedia. Commit lokal saja (git add -A + git commit -m, tanpa push) dan hanya men-stage file di workspace. readOnly: false karena commit dan branch menulis.",
+    "Git di workspace sesi (status, diff, log, commit, branch, push). Hanya di dalam workspace dan hanya bila workspace adalah repo git. TIDAK ada fetch/pull/clone/reset/clean/checkout — operasi jaringan lain dan destruktif tidak tersedia. Push mengirim branch saat ini ke upstream yang sudah dikonfigurasi (git push polos, tanpa force, tanpa argumen remote/branch) dan SELALU minta persetujuan pemilik dulu. Commit lokal saja (git add -A + git commit -m) sampai di-push. readOnly: false karena commit, branch, dan push menulis.",
   parameters: {
     type: "object",
     properties: {
       op: {
         type: "string",
-        enum: ["status", "diff", "log", "commit", "branch"],
+        enum: ["status", "diff", "log", "commit", "branch", "push"],
         description:
-          "status: perubahan belum commit; diff: isi perubahan; log: riwayat commit; commit: commit lokal; branch: buat/lihat branch",
+          "status: perubahan belum commit; diff: isi perubahan; log: riwayat commit; commit: commit lokal; branch: buat/lihat branch; push: kirim branch saat ini ke upstream (minta persetujuan pemilik dulu)",
       },
       message: {
         type: "string",
@@ -189,12 +192,26 @@ export const gitTool = defineTool({
   },
   readOnly: false,
   schema: gitSchema,
+  // Push publishes to a remote: always ask the owner first. Everything
+  // else in this tool is local and runs without a prompt.
+  gate: (a) =>
+    a.op === "push"
+      ? {
+          decision: "confirm",
+          command: "git push",
+          reason:
+            "push mengirim commit ke remote — minta persetujuan pemilik tiap kali",
+          risk: "medium",
+        }
+      : { decision: "allow" },
   label: (a) =>
     a.op === "commit"
       ? `git commit: ${(a.message ?? "").slice(0, 60)}`
       : a.op === "branch" && a.name
         ? `git branch ${a.name}`
-        : `git ${a.op}`,
+        : a.op === "push"
+          ? "git push"
+          : `git ${a.op}`,
   publicArgs: (a) => ({
     op: a.op,
     ...(a.op === "branch" && a.name ? { name: a.name } : {}),
@@ -344,6 +361,36 @@ export const gitTool = defineTool({
           ok: true,
           summary: `${lines.length} branch`,
           output: text || "(tidak ada branch)",
+          changes: [],
+        };
+      }
+      case "push": {
+        // Plain `git push`: current branch to its configured upstream only.
+        // No --force, no remote/branch arguments — the owner sets the
+        // upstream once from the terminal if the branch has none yet.
+        const branch = await runGit(ctx.workspace, [
+          "rev-parse",
+          "--abbrev-ref",
+          "HEAD",
+        ]);
+        const name = branch.ok ? branch.output.trim() : "?";
+        const r = await runGit(ctx.workspace, ["push"]);
+        if (!r.ok) {
+          if (
+            r.output.includes("has no upstream branch") ||
+            r.output.includes("No configured push destination")
+          ) {
+            throw new AgentError(
+              "tool_failed",
+              `branch '${name}' belum punya upstream — set dulu dari terminal: git push -u origin ${name}`,
+            );
+          }
+          throw gitFailure(r, "push");
+        }
+        return {
+          ok: true,
+          summary: `push '${name}' ke upstream berhasil`,
+          output: `Branch '${name}' terkirim ke upstream.`,
           changes: [],
         };
       }

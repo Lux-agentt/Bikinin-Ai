@@ -136,16 +136,8 @@ describe("git branch", () => {
 });
 
 describe("git guard", () => {
-  it("menolak op di luar enum (push/fetch/reset tidak ada)", () => {
-    for (const op of [
-      "push",
-      "fetch",
-      "pull",
-      "clone",
-      "reset",
-      "clean",
-      "checkout",
-    ]) {
+  it("menolak op di luar enum (fetch/pull/clone/reset/clean/checkout tidak ada)", () => {
+    for (const op of ["fetch", "pull", "clone", "reset", "clean", "checkout"]) {
       expect(gitTool.parse({ op }).ok).toBe(false);
     }
   });
@@ -163,5 +155,40 @@ describe("git guard", () => {
     const r = await runGit({ op: "log" }, ws);
     expect(r.ok).toBe(true);
     expect(r.output).toMatch(/Belum ada commit/);
+  });
+});
+
+describe("git push", () => {
+  it("push selalu minta persetujuan (confirm), op lain langsung jalan", () => {
+    const push = gitTool.parse({ op: "push" });
+    expect(push.ok).toBe(true);
+    if (push.ok) expect(push.gate.decision).toBe("confirm");
+    const status = gitTool.parse({ op: "status" });
+    expect(status.ok).toBe(true);
+    if (status.ok) expect(status.gate.decision).toBe("allow");
+  });
+
+  it("push tanpa upstream gagal dengan pesan jelas", async () => {
+    const ws = await initRepo();
+    await expect(runGit({ op: "push" }, ws)).rejects.toThrow(
+      /belum punya upstream/,
+    );
+  });
+
+  it("push ke remote lokal berhasil dan commit sampai", async () => {
+    const ws = await initRepo();
+    const remote = await tempWorkspace();
+    await git(remote, ["init", "--bare", "-b", "main"]);
+    await git(ws, ["remote", "add", "origin", remote]);
+    await git(ws, ["push", "-u", "origin", "main"]);
+    // Commit kedua: push polos (tanpa -u) harus jalan ke upstream.
+    await writeFile(join(ws, "b.txt"), "dua\n");
+    await git(ws, ["add", "-A"]);
+    await git(ws, ["commit", "-m", "commit kedua"]);
+    const r = await runGit({ op: "push" }, ws);
+    expect(r.ok).toBe(true);
+    expect(r.summary).toMatch(/push 'main' ke upstream berhasil/);
+    const log = await git(remote, ["log", "--oneline"]);
+    expect(log.output).toMatch(/commit kedua/);
   });
 });

@@ -96,6 +96,26 @@ describe("listSkills", () => {
       { name: "zeta", description: "Skill Z." },
     ]);
   });
+
+  it("lists the bounty skills shipped in the repo", async () => {
+    const names = (await listSkills(REPO_SKILLS_DIR)).map((s) => s.name);
+    for (const expected of [
+      "bug-bounty-writeups",
+      "web3-ai-tools",
+      "web3-bug-classes",
+      "web3-case-study-role-misconfig",
+      "web3-grep-arsenal",
+      "web3-hunt-foundation",
+      "web3-hunt-zksync-era",
+      "web3-methodology-research",
+      "web3-poc-foundry",
+      "web3-solidity-audit-mcp",
+      "web3-start-here",
+      "web3-triage-report",
+    ]) {
+      expect(names).toContain(expected);
+    }
+  });
 });
 
 describe("formatSkillList", () => {
@@ -171,25 +191,41 @@ describe("read_skill tool", () => {
 describe("system prompt wiring", () => {
   it("lists the real website and remotion skills and nothing else is leaked", async () => {
     const skills = await listSkills(REPO_SKILLS_DIR);
-    expect(skills).toEqual([
-      {
-        name: "remotion",
-        description:
-          "Gunakan saat pengguna ingin membuat video, animasi, atau motion graphic dengan Remotion.",
-      },
-      {
-        name: "website",
-        description:
-          "Gunakan saat pengguna ingin membuat website, landing page, atau halaman web baru, atau memperbaiki tampilan dan struktur website yang sudah ada.",
-      },
+    expect(skills.map((s) => s.name)).toEqual([
+      "bug-bounty-writeups",
+      "remotion",
+      "web3-ai-tools",
+      "web3-bug-classes",
+      "web3-case-study-role-misconfig",
+      "web3-grep-arsenal",
+      "web3-hunt-foundation",
+      "web3-hunt-zksync-era",
+      "web3-methodology-research",
+      "web3-poc-foundry",
+      "web3-solidity-audit-mcp",
+      "web3-start-here",
+      "web3-triage-report",
+      "website",
     ]);
+    expect(skills.find((s) => s.name === "website")).toEqual({
+      name: "website",
+      description:
+        "Gunakan saat pengguna ingin membuat website, landing page, atau halaman web baru, atau memperbaiki tampilan dan struktur website yang sudah ada.",
+    });
+    expect(skills.find((s) => s.name === "remotion")).toEqual({
+      name: "remotion",
+      description:
+        "Gunakan saat pengguna ingin membuat video, animasi, atau motion graphic dengan Remotion.",
+    });
     const prompt = await loadSystemPrompt(formatSkillList(skills));
     expect(prompt).toContain("- website: Gunakan saat pengguna ingin membuat");
     expect(prompt).toContain("- remotion: Gunakan saat pengguna ingin membuat video");
+    expect(prompt).toContain("- bug-bounty-writeups: Learn bug bounty methodology");
     expect(prompt).not.toContain("{{DAFTAR_SKILL}}");
     expect(prompt).not.toContain("(belum ada skill)");
     // Only name + description enter the prompt, never the full skill text.
     expect(prompt).not.toContain("Kesalahan umum");
+    expect(prompt).not.toContain("Accounting Desync");
   });
 });
 

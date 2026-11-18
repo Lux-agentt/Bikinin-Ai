@@ -77,6 +77,8 @@ bikinin-ai/
     website/SKILL.md
     remotion/SKILL.md      # format: Lampiran C
     nextjs-cloudflare/SKILL.md  # isi: Lampiran E
+    bug-bounty-writeups/SKILL.md  # metodologi bug bounty (ditransfer 2026-11-18)
+    web3-*/SKILL.md        # 11 skill audit smart contract / bug bounty web3 (ditransfer 2026-11-18)
   prompts/system-prompt.md # isi: Lampiran B
   design/bikinin-ai-ui.html# acuan desain UI (prototipe simulasi)
   workspace/               # hasil kerja agent (gitignored)
@@ -196,7 +198,7 @@ Supaya agent makin mirip Claude Code / Codex / Grok: bisa mencari di internet, b
 - [x] Vision: tool `inspect_image` mengirim gambar ke model yang mendukung image input; fallback ke model berikutnya yang mendukung, atau jujur melapor bila tidak tersedia.
 - [x] Plan mode: tugas besar meminta persetujuan rencana sebelum mengubah file (pakai dialog approval yang sudah ada).
 - [x] Diff review: perubahan file tampil sebagai ringkasan diff di UI/event, tidak diterapkan diam-diam.
-- [x] Tool `git`: status, diff, log, commit, branch — hanya di workspace sesi, tanpa push.
+- [x] Tool `git`: status, diff, log, commit, branch, push — hanya di workspace sesi. Push mengirim branch saat ini ke upstream (git push polos, tanpa force) dan SELALU minta persetujuan pemilik dulu (confirm-gated); fetch/pull/clone/reset/clean/checkout tetap tidak ada.
 - [x] MCP client minimal: memanggil tool dari satu MCP server eksternal yang dikonfigurasi pemilik + satu server contoh yang jalan.
 
 **Selesai jika:** "buatkan website lalu perbaiki sampai lolos cek sendiri" selesai dengan verifikasi tercatat; pelajaran dari run gagal muncul di run mirip berikutnya; screenshot preview dinilai dengan benar; rencana besar ditahan sampai disetujui; `git commit` tercatat; MCP contoh terpanggil.
