@@ -85,6 +85,35 @@ const BLOCKED: Array<{ re: RegExp; reason: string }> = [
     reason: "pipe unduhan ke shell",
   },
   { re: /:\(\)\s*\{/, reason: "fork bomb" },
+  {
+    // curl/wget yang mengirim data atau file keluar: -d/--data* (isi POST),
+    // --upload-file/-T (unggah file), --form/-F (multipart, bisa "@/path"),
+    // --post-data/--post-file (wget). curl/wget polos (GET) tetap "confirm"
+    // — exfiltrasi lewat network dimatikan sandbox, ini lapis tambahannya.
+    re: /\b(curl|wget)\b[^;&|\n]*?(?:\s|^)(--data(-binary|-raw|-urlencode)?|-d|--upload-file|-T|--form|-F|--post-data|--post-file)(?:\s|=|$)/,
+    reason: "curl/wget mengirim data/file keluar",
+  },
+  {
+    // Netcat/socat: kanal network mentah yang tidak butuh curl.
+    // Pola posisi-perintah supaya "cat nc.txt" (nama file) tidak kena.
+    re: /(^|[\s;&|])(nc|netcat|ncat|socat)(\s|$)/,
+    reason: "netcat/socat tidak diizinkan",
+  },
+  {
+    // Kode inline interpreter (python -c, node -e, ...) menjalankan string
+    // arbitrer tanpa jejak file di workspace — tidak bisa di-review seperti
+    // skrip yang ditulis lewat write_file. Tulis dulu sebagai file, lalu
+    // jalankan filenya (tetap "confirm" bila di luar allowlist).
+    re: /(^|[\s;&|])(python3?|perl|ruby|php|node)\s+(-c|-e|-r|--eval)\b/,
+    reason: "kode inline interpreter (-c/-e/-r) tidak diizinkan",
+  },
+  {
+    // Shell bersarang (sh -c '...') menambah satu lapis quoting tempat pola
+    // di atas bisa disembunyikan; perintah agent tidak butuh sh -c karena
+    // run_command sendiri sudah jalan via /bin/sh -c.
+    re: /(^|[\s;&|])(bash|sh|dash|zsh)\s+-c\b/,
+    reason: "shell bersarang (sh -c) tidak diizinkan",
+  },
 ];
 
 // Each shell segment (split on && || ; | newline) must match one of these to run without asking.

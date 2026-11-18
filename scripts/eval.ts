@@ -20,6 +20,7 @@ import { loadConfig, type Config } from "../src/config.js";
 import { runEvalSuite } from "../src/eval/runner.js";
 import { TASKS } from "../src/eval/tasks.js";
 import { createFallbackLlm } from "../src/llm/fallback.js";
+import { importEvalReport } from "../src/llm/router.js";
 import { loadSystemPrompt } from "../src/prompt.js";
 
 /** Dummy mode must work with no .env and no key (CI); live mode needs config. */
@@ -142,6 +143,17 @@ async function main(): Promise<number> {
       `${t.inputTokens} token in, ${t.outputTokens} token out, $${t.costUsd.toFixed(5)}, ${(t.durationMs / 1000).toFixed(1)} dtk`,
   );
   console.log(`Log: ${logPath}`);
+  if (mode === "live") {
+    // Fase 8: hasil eval live masuk ke tabel kemenangan router, supaya
+    // routing berikutnya berbasis data, bukan cuma heuristik. Mode dummy
+    // sengaja tidak diimpor (skor dummy bukan ukuran kemampuan model).
+    const imported = await importEvalReport(workspaceRoot, report).catch(
+      () => 0,
+    );
+    console.log(
+      `Router: ${imported} hasil eval dicatat ke tabel kemenangan.`,
+    );
+  }
   if (mode === "dummy")
     console.log(
       "Catatan: mode dummy memverifikasi harness (skor dummy bukan ukuran kemampuan model).",

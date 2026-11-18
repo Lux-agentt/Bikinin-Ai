@@ -1,6 +1,6 @@
 // Ledger (Fase 7, Track B): built from existing events, persisted per
 // session, exposed over HTTP, and consistent with the .jsonl event log.
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +9,7 @@ import type { Config } from "../src/config.js";
 import { createEmitter, type AgentEvent } from "../src/events.js";
 import type { ChatResult, LlmClient, ToolCallReq } from "../src/llm/client.js";
 import { costUsd } from "../src/llm/pricing.js";
+import { quotaFilePath, utcDay } from "../src/llm/quota.js";
 import { createEventLog } from "../src/server/event-log.js";
 import { createAppServer } from "../src/server/http.js";
 import {
@@ -51,13 +52,19 @@ function fakeRunEvents(): AgentEvent[] {
     input_tokens: 100,
     output_tokens: 20,
     cached_tokens: 10,
-    cost_usd: costUsd({ input_tokens: 100, output_tokens: 20 }, { inPerM: 1, outPerM: 2 }),
+    cost_usd: costUsd(
+      { input_tokens: 100, output_tokens: 20 },
+      { inPerM: 1, outPerM: 2 },
+    ),
     totals: {
       steps: 1,
       input_tokens: 100,
       output_tokens: 20,
       cached_tokens: 10,
-      cost_usd: costUsd({ input_tokens: 100, output_tokens: 20 }, { inPerM: 1, outPerM: 2 }),
+      cost_usd: costUsd(
+        { input_tokens: 100, output_tokens: 20 },
+        { inPerM: 1, outPerM: 2 },
+      ),
     },
   });
   emit("tool_call_started", {
@@ -79,15 +86,24 @@ function fakeRunEvents(): AgentEvent[] {
     input_tokens: 50,
     output_tokens: 10,
     cached_tokens: 0,
-    cost_usd: costUsd({ input_tokens: 50, output_tokens: 10 }, { inPerM: 1, outPerM: 2 }),
+    cost_usd: costUsd(
+      { input_tokens: 50, output_tokens: 10 },
+      { inPerM: 1, outPerM: 2 },
+    ),
     totals: {
       steps: 2,
       input_tokens: 150,
       output_tokens: 30,
       cached_tokens: 10,
       cost_usd:
-        costUsd({ input_tokens: 100, output_tokens: 20 }, { inPerM: 1, outPerM: 2 }) +
-        costUsd({ input_tokens: 50, output_tokens: 10 }, { inPerM: 1, outPerM: 2 }),
+        costUsd(
+          { input_tokens: 100, output_tokens: 20 },
+          { inPerM: 1, outPerM: 2 },
+        ) +
+        costUsd(
+          { input_tokens: 50, output_tokens: 10 },
+          { inPerM: 1, outPerM: 2 },
+        ),
     },
   });
   emit("run_finished", {
@@ -99,8 +115,14 @@ function fakeRunEvents(): AgentEvent[] {
       output_tokens: 30,
       cached_tokens: 10,
       cost_usd:
-        costUsd({ input_tokens: 100, output_tokens: 20 }, { inPerM: 1, outPerM: 2 }) +
-        costUsd({ input_tokens: 50, output_tokens: 10 }, { inPerM: 1, outPerM: 2 }),
+        costUsd(
+          { input_tokens: 100, output_tokens: 20 },
+          { inPerM: 1, outPerM: 2 },
+        ) +
+        costUsd(
+          { input_tokens: 50, output_tokens: 10 },
+          { inPerM: 1, outPerM: 2 },
+        ),
     },
     duration_ms: 1234,
     resumable: false,
@@ -125,7 +147,10 @@ describe("buildLedgerFromEvents", () => {
     expect(l.cached_tokens).toBe(10);
     // Cost equals the loop's own recompute from inPerM/outPerM prices.
     expect(l.cost_usd).toBeCloseTo(
-      costUsd({ input_tokens: 150, output_tokens: 30 }, { inPerM: 1, outPerM: 2 }),
+      costUsd(
+        { input_tokens: 150, output_tokens: 30 },
+        { inPerM: 1, outPerM: 2 },
+      ),
       10,
     );
     expect(l.duration_ms).toBe(1234);
@@ -223,10 +248,44 @@ describe("ledger persistence", () => {
     expect(rebuilt).toHaveLength(1);
     expect(rebuilt[0]?.input_tokens).toBe(150);
     expect(rebuilt[0]?.cost_usd).toBeCloseTo(
-      costUsd({ input_tokens: 150, output_tokens: 30 }, { inPerM: 1, outPerM: 2 }),
+      costUsd(
+        { input_tokens: 150, output_tokens: 30 },
+        { inPerM: 1, outPerM: 2 },
+      ),
       10,
     );
     expect(rebuilt[0]?.tool_calls.total).toBe(2);
+  });
+});
+
+describe("ledger quota snapshot (Fase 8)", () => {
+  it("attaches today's :free snapshot when a counter file exists, and nothing when it does not", async () => {
+    const ws = await mkdtemp(join(tmpdir(), "bikinin-ledger-"));
+    const ledger = buildLedgerFromEvents(
+      fakeRunEvents(),
+      "run_aaaaaaaa",
+    ) as RunLedger;
+    // No :free request today: the persisted ledger is unchanged.
+    await upsertLedger(ws, "s_1234abcd", ledger);
+    expect((await loadLedger(ws, "s_1234abcd"))[0]?.quota).toBeUndefined();
+    // With a counter file, the snapshot is attached on upsert.
+    await mkdir(join(ws, ".bikinin", "quota"), { recursive: true });
+    await writeFile(
+      quotaFilePath(ws, utcDay()),
+      JSON.stringify({
+        version: 1,
+        date: utcDay(),
+        free: { used: 12, limit: 50 },
+        by_model: { "test-model": 12 },
+      }),
+      "utf8",
+    );
+    await upsertLedger(ws, "s_1234abcd", ledger);
+    expect((await loadLedger(ws, "s_1234abcd"))[0]?.quota).toEqual({
+      date: utcDay(),
+      free_used: 12,
+      free_limit: 50,
+    });
   });
 });
 
@@ -297,16 +356,20 @@ describe("GET /api/sessions/:id/ledger", () => {
           call("c0", "update_plan", {
             items: [{ text: "Tulis index.html", status: "doing" }],
           }),
-          call("c1", "write_file", { path: "index.html", content: "<h1>hi</h1>" }),
+          call("c1", "write_file", {
+            path: "index.html",
+            content: "<h1>hi</h1>",
+          }),
         ],
         usage,
       },
       { text: "Selesai.", toolCalls: [], usage },
     ];
-    const manager = new RunManager(
-      cfg,
-      { workspace, systemPrompt: "sys", llm: scripted(responses) },
-    );
+    const manager = new RunManager(cfg, {
+      workspace,
+      systemPrompt: "sys",
+      llm: scripted(responses),
+    });
     const server = createAppServer(manager, workspace);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     open.push(
@@ -342,7 +405,10 @@ describe("GET /api/sessions/:id/ledger", () => {
     expect(l.input_tokens).toBe(200);
     expect(l.output_tokens).toBe(40);
     expect(l.cost_usd).toBeCloseTo(
-      costUsd({ input_tokens: 200, output_tokens: 40 }, { inPerM: 1, outPerM: 2 }),
+      costUsd(
+        { input_tokens: 200, output_tokens: 40 },
+        { inPerM: 1, outPerM: 2 },
+      ),
       10,
     );
     expect(l.tool_calls.total).toBe(2);

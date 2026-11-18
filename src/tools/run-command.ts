@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { dirname } from "node:path";
+import { realpath } from "node:fs/promises";
+import { dirname, sep } from "node:path";
 import { z } from "zod";
 import { AgentError } from "../errors.js";
 import { classifyCommand } from "../safety/commands.js";
@@ -43,6 +44,170 @@ interface ShellResult {
   output: string;
 }
 
+/* ---------- sandbox (Fase 8): user namespace via unshare ---------- */
+
+// Penanda bahwa skrip setup di dalam namespace gagal sebelum perintah agent
+// sempat jalan. Dibedakan dari exit code perintah itu sendiri (perintah yang
+// gagal tidak pernah mencetak penanda ini).
+const SANDBOX_SETUP_FAILED = "BIKININ_SANDBOX_SETUP_FAILED";
+
+// Setup dijalankan /bin/sh -c dengan $1=workspace (realpath), $2=perintah
+// agent, $3=staging dir. Urutan penting:
+//  1. make-rprivate: mount di bawah ini tidak bocor ke host (tanpa ini,
+//     bind/tmpfs bisa menular ke mount namespace induk).
+//  2. Bind workspace ke staging, lalu remount / read-only, lalu remount
+//     staging read-write — jadi satu-satunya tempat yang bisa ditulis adalah
+//     workspace (dan tmpfs segar di bawah).
+//  3. Tutup /etc, /root, /home, /tmp dengan tmpfs kosong: file di luar
+//     workspace tidak bisa dibaca (bukan cuma tidak bisa ditulis), dan
+//     tulisan ke sana hilang bersama namespace.
+//  4. HOME baru di dalam /tmp segar (npm butuh HOME yang bisa ditulis);
+//     env rahasia sudah dibuang safeEnv sebelum unshare dipanggil.
+//  5. Net namespace kosong (unshare --net): tanpa interface, tanpa network.
+//     Tool yang memang butuh network (web_search) tidak lewat sini.
+//  6. PID namespace sendiri (--pid --fork): saat init namespace mati,
+//     kernel membunuh semua proses di dalamnya.
+const SANDBOX_SETUP_SCRIPT = [
+  'WS="$1"',
+  'CMD="$2"',
+  'STAGE="$3"',
+  "setup() {",
+  '  mkdir -p "$STAGE" || return 1',
+  "  mount --make-rprivate / || return 1",
+  '  mount --bind "$WS" "$STAGE" || return 1',
+  "  mount -o remount,ro,bind / || return 1",
+  '  mount -o remount,rw,bind "$STAGE" || return 1',
+  "  for d in /etc /root /home /tmp; do",
+  '    if [ -d "$d" ]; then mount -t tmpfs tmpfs "$d" || return 1; fi',
+  "  done",
+  "  mkdir -p /tmp/.bikinin-home || return 1",
+  "}",
+  "if setup; then",
+  "  export HOME=/tmp/.bikinin-home",
+  `  cd "$STAGE" || { echo "${SANDBOX_SETUP_FAILED}" >&2; exit 43; }`,
+  '  exec /bin/sh -c "$CMD"',
+  "else",
+  `  echo "${SANDBOX_SETUP_FAILED}" >&2`,
+  "  exit 42",
+  "fi",
+].join("\n");
+
+/**
+ * BIKININ_SANDBOX=off/0/false mematikan sandbox (perintah jalan langsung
+ * seperti sebelum Fase 8, hanya dijaga classifier + cwd jail). Nilai lain
+ * atau tidak di-set: sandbox nyala. Matikan hanya bila mesin memang tidak
+ * punya user namespace — jangan dipakai untuk lolos dari batas.
+ */
+export function sandboxEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = (env.BIKININ_SANDBOX ?? "").trim().toLowerCase();
+  return raw !== "off" && raw !== "0" && raw !== "false";
+}
+
+/**
+ * Tempat staging bind-mount workspace di dalam sandbox. /mnt dipilih karena
+ * hampir selalu ada dan kosong; bila workspace sendiri ada di bawah /mnt,
+ * pakai /var supaya staging tidak jatuh di dalam workspace.
+ */
+export function sandboxStageDir(workspaceAbs: string): string {
+  const underMnt =
+    workspaceAbs === "/mnt" || workspaceAbs.startsWith("/mnt" + sep);
+  return underMnt ? "/var/.bikinin-ws" : "/mnt/.bikinin-ws";
+}
+
+function sandboxFailure(output: string): AgentError {
+  return new AgentError(
+    "tool_failed",
+    "sandbox gagal disiapkan (user/mount namespace). Perintah TIDAK dijalankan. " +
+      "Periksa dukungan user namespace di mesin ini, atau set BIKININ_SANDBOX=off " +
+      "untuk menjalankan perintah tanpa sandbox (hanya classifier + cwd jail yang menjaga).\n" +
+      output.slice(-1000),
+  );
+}
+
+/**
+ * Jalankan perintah di dalam user+mount+net+pid namespace (unshare).
+ * Gagal menyiapkan namespace = throw, bukan jalan tanpa sandbox.
+ * Diekspor untuk test: memanggil fungsi ini langsung melewati classifier
+ * dengan sengaja, supaya test membuktikan lapis sandbox itu sendiri.
+ */
+export async function execSandboxed(
+  command: string,
+  cwd: string,
+): Promise<ShellResult> {
+  let ws: string;
+  try {
+    ws = await realpath(cwd);
+  } catch {
+    throw new AgentError("tool_failed", `workspace tidak ditemukan: ${cwd}`);
+  }
+  if (ws === "/")
+    throw new AgentError(
+      "tool_failed",
+      "workspace tidak bisa di-sandbox: root filesystem (/) bukan workspace yang valid",
+    );
+  const stage = sandboxStageDir(ws);
+  return new Promise((resolve, reject) => {
+    execFile(
+      "unshare",
+      [
+        "--user",
+        "--map-root-user",
+        "--mount",
+        "--net",
+        "--pid",
+        "--fork",
+        "/bin/sh",
+        "-c",
+        SANDBOX_SETUP_SCRIPT,
+        "bikinin-sandbox",
+        ws,
+        command,
+        stage,
+      ],
+      {
+        cwd: ws,
+        timeout: TIMEOUT_MS,
+        maxBuffer: MAX_BUFFER,
+        env: {
+          ...safeEnv(process.env),
+          HOME: "/tmp/.bikinin-home",
+          GIT_CEILING_DIRECTORIES: dirname(ws),
+        },
+      },
+      (error, stdout, stderr) => {
+        const output = [stdout, stderr ? `[stderr]\n${stderr}` : ""]
+          .filter(Boolean)
+          .join("\n");
+        if (error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+          reject(
+            new AgentError(
+              "tool_failed",
+              "sandbox tidak tersedia: perintah 'unshare' tidak ditemukan di mesin ini. " +
+                "Jalankan di mesin dengan user namespace, atau set BIKININ_SANDBOX=off " +
+                "untuk menjalankan perintah tanpa sandbox (hanya classifier + cwd jail yang menjaga).",
+            ),
+          );
+          return;
+        }
+        // Setup gagal (penanda dari skrip), atau unshare sendiri gagal
+        // sebelum masuk namespace (mis. user namespace ditolak kernel):
+        // perintah agent tidak jalan — laporkan sebagai kegagalan sandbox,
+        // bukan sebagai kegagalan perintah.
+        if (
+          output.includes(SANDBOX_SETUP_FAILED) ||
+          /^unshare: /m.test(output)
+        ) {
+          reject(sandboxFailure(output));
+          return;
+        }
+        const code =
+          typeof error?.code === "number" ? error.code : error ? 1 : 0;
+        resolve({ ok: !error, killed: Boolean(error?.killed), code, output });
+      },
+    );
+  });
+}
+
 function execShell(command: string, cwd: string): Promise<ShellResult> {
   return new Promise((resolve) => {
     execFile(
@@ -69,7 +234,7 @@ function execShell(command: string, cwd: string): Promise<ShellResult> {
 export const runCommandTool = defineTool({
   name: "run_command",
   description:
-    "Jalankan perintah shell di folder workspace (timeout 120 dtk). Perintah di luar allowlist butuh persetujuan pengguna.",
+    "Jalankan perintah shell di folder workspace (timeout 120 dtk), di dalam sandbox user-namespace: tanpa network, filesystem di luar workspace read-only/tersembunyi, env dibersihkan dari rahasia. Perintah di luar allowlist butuh persetujuan pengguna.",
   parameters: {
     type: "object",
     properties: { command: { type: "string", description: "Perintah shell" } },
@@ -87,7 +252,11 @@ export const runCommandTool = defineTool({
     if (verdict.decision === "block")
       throw new AgentError("command_blocked", verdict.reason);
 
-    const r = await execShell(a.command, ctx.workspace);
+    // Default: sandbox. BIKININ_SANDBOX=off = jalan langsung (hanya
+    // classifier + cwd jail), untuk mesin tanpa user namespace.
+    const r = sandboxEnabled()
+      ? await execSandboxed(a.command, ctx.workspace)
+      : await execShell(a.command, ctx.workspace);
     const summary = r.killed
       ? "timeout (120 dtk)"
       : r.ok

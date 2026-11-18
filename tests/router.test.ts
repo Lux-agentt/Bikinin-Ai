@@ -1,6 +1,6 @@
 // Model router (Fase 7, Track C): category -> first model, explicit model
 // wins, router-off keeps the config order, fallback chain stays a permutation.
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -8,9 +8,11 @@ import { AgentEvent, RunStarted } from "../src/events.js";
 import { createFallbackLlm } from "../src/llm/fallback.js";
 import type { ChatResult, LlmClient } from "../src/llm/client.js";
 import type { ProviderConfig } from "../src/llm/providers.js";
+import { quotaFilePath, utcDay } from "../src/llm/quota.js";
 import {
   classifyTask,
   isRouterEnabled,
+  recordRouterOutcome,
   routeProviders,
 } from "../src/llm/router.js";
 import { RunManager } from "../src/server/runs.js";
@@ -27,12 +29,48 @@ function chain(): ProviderConfig[] {
     outPerM: number,
   ): ProviderConfig => ({ name, baseUrl, apiKey: "k", model, inPerM, outPerM });
   return [
-    p("or-north", "cohere/north-mini-code:free", "https://openrouter.ai/api/v1", 0, 0),
-    p("or-supervl", "nvidia/nemotron-3.5-super-vl:free", "https://openrouter.ai/api/v1", 0, 0),
-    p("or-lightning", "nvidia/nemotron-3.5-lightning:free", "https://openrouter.ai/api/v1", 0, 0),
-    p("or-ernie", "baidu/ernie-5.5-flash-preview:free", "https://openrouter.ai/api/v1", 0, 0),
-    p("gemini", "gemini-4-hydrogen", "https://generativelanguage.googleapis.com/v1beta/openai", 0, 0),
-    p("nano", "z-ai/glm-5.3-flash", "https://api.nano-gpt.com/api/v1", 0.15, 0.5),
+    p(
+      "or-north",
+      "cohere/north-mini-code:free",
+      "https://openrouter.ai/api/v1",
+      0,
+      0,
+    ),
+    p(
+      "or-supervl",
+      "nvidia/nemotron-3.5-super-vl:free",
+      "https://openrouter.ai/api/v1",
+      0,
+      0,
+    ),
+    p(
+      "or-lightning",
+      "nvidia/nemotron-3.5-lightning:free",
+      "https://openrouter.ai/api/v1",
+      0,
+      0,
+    ),
+    p(
+      "or-ernie",
+      "baidu/ernie-5.5-flash-preview:free",
+      "https://openrouter.ai/api/v1",
+      0,
+      0,
+    ),
+    p(
+      "gemini",
+      "gemini-4-hydrogen",
+      "https://generativelanguage.googleapis.com/v1beta/openai",
+      0,
+      0,
+    ),
+    p(
+      "nano",
+      "z-ai/glm-5.3-flash",
+      "https://api.nano-gpt.com/api/v1",
+      0.15,
+      0.5,
+    ),
   ];
 }
 
@@ -136,9 +174,7 @@ describe("routeProviders", () => {
       "simpan catatan ini baik-baik",
     );
     expect(route.category).toBe("general");
-    expect(providers.map((p) => p.model)).toEqual(
-      original.map((p) => p.model),
-    );
+    expect(providers.map((p) => p.model)).toEqual(original.map((p) => p.model));
   });
 
   it("is a permutation: the fallback chain keeps every provider", () => {
@@ -160,9 +196,7 @@ describe("routeProviders", () => {
     const { providers, route } = routeProviders(chain(), "buatkan website", {
       enabled: false,
     });
-    expect(providers.map((p) => p.model)).toEqual(
-      original.map((p) => p.model),
-    );
+    expect(providers.map((p) => p.model)).toEqual(original.map((p) => p.model));
     expect(route.category).toBe("general");
     expect(route.preferred_model).toBe(NORTH);
     expect(route.reason).toMatch(/nonaktif/);
@@ -191,8 +225,22 @@ describe("routeProviders", () => {
 
   it("falls back to cheapest for light tasks when no model advertises speed", () => {
     const ps: ProviderConfig[] = [
-      { name: "dear", baseUrl: "https://x.test/v1", apiKey: "k", model: "big-model", inPerM: 5, outPerM: 10 },
-      { name: "cheap", baseUrl: "https://x.test/v1", apiKey: "k", model: "small-model", inPerM: 0.1, outPerM: 0.2 },
+      {
+        name: "dear",
+        baseUrl: "https://x.test/v1",
+        apiKey: "k",
+        model: "big-model",
+        inPerM: 5,
+        outPerM: 10,
+      },
+      {
+        name: "cheap",
+        baseUrl: "https://x.test/v1",
+        apiKey: "k",
+        model: "small-model",
+        inPerM: 0.1,
+        outPerM: 0.2,
+      },
     ];
     const { providers } = routeProviders(ps, "halo");
     expect(providers[0].model).toBe("small-model");
@@ -200,8 +248,22 @@ describe("routeProviders", () => {
 
   it("falls back to priciest for reasoning when no model advertises strength", () => {
     const ps: ProviderConfig[] = [
-      { name: "cheap", baseUrl: "https://x.test/v1", apiKey: "k", model: "small-model", inPerM: 0.1, outPerM: 0.2 },
-      { name: "dear", baseUrl: "https://x.test/v1", apiKey: "k", model: "big-model", inPerM: 5, outPerM: 10 },
+      {
+        name: "cheap",
+        baseUrl: "https://x.test/v1",
+        apiKey: "k",
+        model: "small-model",
+        inPerM: 0.1,
+        outPerM: 0.2,
+      },
+      {
+        name: "dear",
+        baseUrl: "https://x.test/v1",
+        apiKey: "k",
+        model: "big-model",
+        inPerM: 5,
+        outPerM: 10,
+      },
     ];
     const { providers } = routeProviders(ps, "bandingkan A dan B");
     expect(providers[0].model).toBe("big-model");
@@ -262,13 +324,19 @@ describe("RunStarted route field", () => {
       }),
     ).not.toThrow();
     expect(() => RunStarted.parse(base)).not.toThrow();
-    expect(() => AgentEvent.parse({ ...base, route: { category: "nope" } })).toThrow();
+    expect(() =>
+      AgentEvent.parse({ ...base, route: { category: "nope" } }),
+    ).toThrow();
   });
 });
 
 describe("RunManager routing (integration)", () => {
   const usage = { input_tokens: 100, output_tokens: 20, cached_tokens: 0 };
-  const finalText = (text: string): ChatResult => ({ text, toolCalls: [], usage });
+  const finalText = (text: string): ChatResult => ({
+    text,
+    toolCalls: [],
+    usage,
+  });
 
   async function bootManager(
     providers: ProviderConfig[],
@@ -290,7 +358,12 @@ describe("RunManager routing (integration)", () => {
       {
         workspace,
         systemPrompt: "sys",
-        llm: { async chat(p) { p.onText?.("selesai"); return finalText("selesai"); } },
+        llm: {
+          async chat(p) {
+            p.onText?.("selesai");
+            return finalText("selesai");
+          },
+        },
       },
     );
     return manager;
@@ -353,5 +426,78 @@ describe("RunManager routing (integration)", () => {
     if (started.type !== "run_started") throw new Error("bukan run_started");
     expect(started.model).toBe("gemini-4-hydrogen");
     expect(started.route?.preferred_model).toBe("gemini-4-hydrogen");
+  });
+});
+
+describe("data-driven routing + quota skip (Fase 8)", () => {
+  const ERNIE = "baidu/ernie-5.5-flash-preview:free";
+
+  async function tmpWs(): Promise<string> {
+    const base = await mkdtemp(join(tmpdir(), "bikinin-router8-"));
+    const ws = join(base, "ws");
+    await mkdir(ws, { recursive: true });
+    return ws;
+  }
+
+  it("picks the measured winner over the heuristic once data exists", async () => {
+    const ws = await tmpWs();
+    // Heuristic for light tasks is Lightning; record it losing and Ernie
+    // winning 4/4 in "light".
+    for (let i = 0; i < 4; i++) {
+      await recordRouterOutcome(ws, {
+        model: LIGHTNING,
+        category: "light",
+        won: false,
+      });
+      await recordRouterOutcome(ws, {
+        model: ERNIE,
+        category: "light",
+        won: true,
+      });
+    }
+    const { providers, route } = routeProviders(chain(), "halo", {
+      workspace: ws,
+    });
+    expect(providers[0]?.model).toBe(ERNIE);
+    expect(route.reason).toMatch(/data router/);
+  });
+
+  it("router-off ignores recorded data and keeps the config order", async () => {
+    const ws = await tmpWs();
+    for (let i = 0; i < 4; i++) {
+      await recordRouterOutcome(ws, {
+        model: ERNIE,
+        category: "light",
+        won: true,
+      });
+    }
+    const { providers, route } = routeProviders(chain(), "halo", {
+      enabled: false,
+      workspace: ws,
+    });
+    expect(providers.map((p) => p.model)).toEqual(chain().map((p) => p.model));
+    expect(route.reason).toMatch(/nonaktif/);
+  });
+
+  it("moves a coding run to Gemini when the :free pool is exhausted", async () => {
+    const ws = await tmpWs();
+    await mkdir(join(ws, ".bikinin", "quota"), { recursive: true });
+    await writeFile(
+      quotaFilePath(ws, utcDay()),
+      JSON.stringify({
+        version: 1,
+        date: utcDay(),
+        free: { used: 50, limit: 50 },
+        by_model: {},
+      }),
+      "utf8",
+    );
+    const { providers, route } = routeProviders(
+      chain(),
+      "buatkan landing page",
+      { workspace: ws },
+    );
+    expect(providers[0]?.model).toBe("gemini-4-hydrogen");
+    expect(route.reason).toMatch(/kuota :free habis/);
   });
 });

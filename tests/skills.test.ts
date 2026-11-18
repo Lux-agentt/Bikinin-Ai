@@ -1,4 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -9,6 +10,9 @@ import {
   REPO_SKILLS_DIR,
 } from "../src/skills/loader.js";
 import { loadSystemPrompt } from "../src/prompt.js";
+import type { Config } from "../src/config.js";
+import type { ChatResult, LlmClient } from "../src/llm/client.js";
+import { RunManager } from "../src/server/runs.js";
 import { runTool, tempWorkspace } from "./helpers.js";
 
 async function makeSkill(
@@ -186,5 +190,139 @@ describe("system prompt wiring", () => {
     expect(prompt).not.toContain("(belum ada skill)");
     // Only name + description enter the prompt, never the full skill text.
     expect(prompt).not.toContain("Kesalahan umum");
+  });
+});
+
+describe("hot reload skill (Fase 8)", () => {
+  const testCfg: Config = {
+    providers: [
+      {
+        name: "t",
+        baseUrl: "https://x.test/v1",
+        apiKey: "k",
+        model: "test-model",
+        inPerM: 1,
+        outPerM: 2,
+      },
+    ],
+    BIKININ_USD_IDR: 17000,
+    BIKININ_MAX_STEPS: 10,
+    BIKININ_MAX_COST_USD: 1,
+    BIKININ_WORKSPACE: "./workspace",
+    BIKININ_MAX_VIDEO_SECONDS: 30,
+  };
+
+  async function waitFinished(manager: RunManager, runId: string) {
+    const t0 = Date.now();
+    while (!manager.get(runId)?.finished) {
+      if (Date.now() - t0 > 5000)
+        throw new Error("timeout menunggu run selesai");
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+
+  it("skill baru muncul di run berikutnya tanpa restart server", async () => {
+    const skillsDir = await mkdtemp(join(tmpdir(), "bikinin-skills-"));
+    await makeSkill(skillsDir, "website", GOOD);
+    const workspace = await realpath(await tempWorkspace());
+
+    // Stub LLM: finishes immediately, but records the system prompt it got.
+    const seenPrompts: string[] = [];
+    const llm: LlmClient = {
+      async chat(p) {
+        const first = p.messages[0] as { content?: unknown } | undefined;
+        seenPrompts.push(
+          typeof first?.content === "string" ? first.content : "",
+        );
+        return {
+          text: "selesai",
+          toolCalls: [],
+          usage: { input_tokens: 10, output_tokens: 5, cached_tokens: 0 },
+        } satisfies ChatResult;
+      },
+    };
+
+    const buildSystemPrompt = async () =>
+      loadSystemPrompt(formatSkillList(await listSkills(skillsDir)));
+    const manager = new RunManager(testCfg, {
+      workspace,
+      systemPrompt: await buildSystemPrompt(),
+      buildSystemPrompt,
+      llm,
+    });
+
+    const run1 = manager.start({
+      message: "tes satu",
+      attachment_ids: [],
+      effort: "sedang",
+    });
+    await waitFinished(manager, run1.run_id);
+    expect(seenPrompts).toHaveLength(1);
+    expect(seenPrompts[0]).toContain(
+      "- website: Gunakan saat membuat website.",
+    );
+    expect(seenPrompts[0]).not.toContain("baru-skill");
+
+    // Folder skill baru ditambah SELAMA "server" jalan, tanpa restart.
+    await makeSkill(
+      skillsDir,
+      "baru-skill",
+      `---\nname: baru-skill\ndescription: Skill yang baru ditambah.\n---\n\n# Baru\n`,
+    );
+
+    const run2 = manager.start({
+      message: "tes dua",
+      attachment_ids: [],
+      effort: "sedang",
+    });
+    await waitFinished(manager, run2.run_id);
+    expect(seenPrompts).toHaveLength(2);
+    expect(seenPrompts[1]).toContain("- baru-skill: Skill yang baru ditambah.");
+    // Skill lama tetap ada; read_skill juga langsung bisa membacanya
+    // (readSkill me-list ulang tiap panggilan).
+    expect(seenPrompts[1]).toContain(
+      "- website: Gunakan saat membuat website.",
+    );
+    expect(await readSkill(skillsDir, "baru-skill")).toContain("# Baru");
+  });
+
+  it("skill rusak yang ditambah belakangan di-skip, run tetap jalan", async () => {
+    const skillsDir = await mkdtemp(join(tmpdir(), "bikinin-skills-"));
+    await makeSkill(skillsDir, "website", GOOD);
+    const workspace = await realpath(await tempWorkspace());
+    const seenPrompts: string[] = [];
+    const llm: LlmClient = {
+      async chat(p) {
+        const first = p.messages[0] as { content?: unknown } | undefined;
+        seenPrompts.push(
+          typeof first?.content === "string" ? first.content : "",
+        );
+        return {
+          text: "selesai",
+          toolCalls: [],
+          usage: { input_tokens: 10, output_tokens: 5, cached_tokens: 0 },
+        } satisfies ChatResult;
+      },
+    };
+    const buildSystemPrompt = async () =>
+      loadSystemPrompt(formatSkillList(await listSkills(skillsDir)));
+    const manager = new RunManager(testCfg, {
+      workspace,
+      systemPrompt: await buildSystemPrompt(),
+      buildSystemPrompt,
+      llm,
+    });
+
+    await makeSkill(skillsDir, "rusak", "# tanpa frontmatter\n");
+    const run = manager.start({
+      message: "tes",
+      attachment_ids: [],
+      effort: "sedang",
+    });
+    await waitFinished(manager, run.run_id);
+    expect(seenPrompts).toHaveLength(1);
+    expect(seenPrompts[0]).toContain("- website:");
+    expect(seenPrompts[0]).not.toContain("rusak");
+    expect(manager.get(run.run_id)?.events.at(-1)?.type).toBe("run_finished");
   });
 });

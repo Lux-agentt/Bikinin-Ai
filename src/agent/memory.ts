@@ -6,8 +6,18 @@
 //   run outcomes (files created/changed) are recorded. Raw transcripts are
 //   never stored here; session transcripts live in the per-session files.
 // - Anything that looks like a secret is dropped before it can be written.
-// - Injection is a small char-budgeted slice (newest first) prepended to the
-//   system prompt, so the model sees it without blowing the token budget.
+// - Injection is a small char-budgeted slice prepended to the system
+//   prompt, ranked by keyword overlap with the current message + recency
+//   (same pattern as lessons injection), so the model sees the relevant
+//   past facts without blowing the token budget.
+// - OPTIONAL model-assisted extraction (Fase 8) covers implicit
+//   preferences the rules miss ("aku tuh paling males kalau ...",
+//   "biasanya aku ..."). It is OFF by default (BIKININ_MEMORY_MODEL_EXTRACT),
+//   runs at most ONE extra call per run, ONLY against a `:free` model via a
+//   direct client (never the fallback chain, which could spill to a paid
+//   model), and its output still passes the same secret filter. Any
+//   failure (no free provider, quota/429, bad output) disables it silently
+//   for that run — the rule-based path above always keeps working.
 import type { ChatCompletionMessageParam as Msg } from "openai/resources/chat/completions";
 
 export const MEMORY_INJECT_BUDGET = 6000; // chars injected into the system prompt
@@ -147,6 +157,158 @@ export function extractFacts(
   return out;
 }
 
+/* ---------- optional model-assisted extraction (Fase 8) ---------- */
+
+// Sentences that carry an implied preference or habit without stating it
+// explicitly: no rule above matches them ("suka/mau/ingin/jangan" and
+// friends are absent), but the phrasing still says something durable
+// about the user. These are CANDIDATES for one model call — the model
+// decides whether each one really is a preference; the rules never see
+// them, so without this step they would be lost.
+const IMPLICIT_PATTERNS: RegExp[] = [
+  // "aku tuh paling males kalau loadingnya lama", "benci kalau ..."
+  /\b(males|malas|benci|sebel|capek|pegal|ribet|pusing)\b.*\b(kalau|kalo|saat|ketika|pas)\b/i,
+  // "biasanya aku ngoding jam 2 pagi", "biasanya kubuka ..."
+  /\bbiasanya\b/i,
+  // "aku tuh lebih suka yang simpel" is caught by the rules; "aku tuh ..."
+  // without an explicit preference verb still implies one.
+  /\b(aku|saya|gue)\s+tuh\b/i,
+  // "lebih enak kalau ...", "mending pakai ...", "enakan yang ..."
+  /\b(lebih\s+(enak|gampang|mudah|cepat|simpel)|enakan|mending)\b/i,
+  // "nggak betah kalau ...", "tidak betah ..."
+  /\b(nggak|ngga|tidak|tak|ga)\s+betah\b/i,
+  // "kalau bisa jangan ...", "kalau bisa pakai ..." — a soft preference.
+  /\b(kalau|kalo)\s+bisa\b/i,
+  // "usahain ..." / "usahakan ..." — a standing instruction in disguise.
+  /\b(usahain|usahakan)\b/i,
+];
+
+/**
+ * User sentences that match NO extraction rule but DO match an
+ * implicit-preference pattern. Deduplicated, secret-filtered, capped so
+ * the model prompt stays small. Empty when the run said nothing
+ * implicit — the caller then makes no model call at all.
+ */
+export function collectImplicitCandidates(transcript: Msg[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const m of transcript) {
+    if (m.role !== "user" || typeof m.content !== "string") continue;
+    for (const s of sentences(m.content)) {
+      if (containsSecret(s)) continue;
+      if (RULES.some((r) => r.re.test(s))) continue; // rules already got it
+      if (!IMPLICIT_PATTERNS.some((p) => p.test(s))) continue;
+      const t = s.replace(/\s+/g, " ").trim().slice(0, MEMORY_ENTRY_MAX);
+      if (t.length < 8 || seen.has(t.toLowerCase())) continue;
+      seen.add(t.toLowerCase());
+      out.push(t);
+      if (out.length >= 10) return out;
+    }
+  }
+  return out;
+}
+
+/** True for OpenRouter free-tier model names ("...:free"). Paid models
+ *  (Nano, Gemini, any name without the :free suffix) return false. */
+export function isFreeModel(model: string): boolean {
+  return model.includes(":free");
+}
+
+/** One chat call against a `:free` model. Implemented by the caller with a
+ *  DIRECT client for that provider — never the fallback chain, which would
+ *  spill over to a paid provider when the free one returns 429. */
+export type FreeModelCall = (prompt: string) => Promise<string>;
+
+export function buildImplicitExtractPrompt(candidates: string[]): string {
+  return [
+    "Dari kalimat-kalimat pengguna berikut, tuliskan preferensi atau kebiasaan tersiratnya — hal yang TIDAK dinyatakan eksplisit dengan kata suka/mau/ingin/jangan, tapi tersirat dari cara dia mengatakannya.",
+    'Jawab HANYA dengan array JSON, tanpa penjelasan. Setiap item: {"kind": "preferensi", "text": "..."}.',
+    "Tulis ulang dengan kata-kata pengguna sendiri, jangan menambah fakta baru. Abaikan kalimat yang bukan preferensi atau kebiasaan. Kalau tidak ada yang tersirat, jawab [].",
+    "Kalimat:",
+    ...candidates.map((c) => `- ${c}`),
+  ].join("\n");
+}
+
+const IMPLICIT_MAX_ITEMS = 5;
+
+/** Parses one model reply into facts. Never throws: garbage, a wrong
+ *  shape, or a secret in the output all yield [] (or the clean items).
+ *  The caller makes exactly ONE call per run — this function never retries. */
+export function parseImplicitFacts(reply: string): FreshFact[] {
+  const start = reply.indexOf("[");
+  const end = reply.lastIndexOf("]");
+  if (start < 0 || end <= start) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(reply.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out: FreshFact[] = [];
+  const seen = new Set<string>();
+  for (const item of parsed.slice(0, IMPLICIT_MAX_ITEMS)) {
+    if (typeof item !== "object" || item === null) continue;
+    const { kind, text } = item as Record<string, unknown>;
+    if (kind !== "preferensi" && kind !== "fakta") continue;
+    if (typeof text !== "string") continue;
+    const fact = cleanFact(kind, text);
+    if (!fact) continue;
+    const key = `${fact.kind}:${fact.text.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(fact);
+  }
+  return out;
+}
+
+/**
+ * Runs the optional model-assisted extraction over one finished run's
+ * transcript. Makes at most ONE call, and only when every gate passes:
+ * the env flag is on, a `:free` model name was supplied, and there is at
+ * least one implicit candidate. Any failure of the call itself (quota,
+ * 429, network, bad output) returns [] — the feature self-disables for
+ * that run and the rule-based extraction is unaffected.
+ */
+export async function extractImplicitFacts(
+  candidates: string[],
+  callFreeModel: FreeModelCall,
+): Promise<FreshFact[]> {
+  if (candidates.length === 0) return [];
+  try {
+    const reply = await callFreeModel(buildImplicitExtractPrompt(candidates));
+    return parseImplicitFacts(reply);
+  } catch {
+    return [];
+  }
+}
+
+export interface ImplicitExtractDeps {
+  /** BIKININ_MEMORY_MODEL_EXTRACT — off by default. */
+  enabled: boolean;
+  /** First `:free` provider's model name; undefined when none is configured. */
+  freeModel?: string;
+  /** Single direct call against that free provider (no fallback chain). */
+  callFreeModel: FreeModelCall;
+}
+
+/**
+ * The whole gate in one place, so the call site stays trivial: off →
+ * no call; no free provider → no call; nothing implicit to extract →
+ * no call. Returns [] in all three cases, and also when the model call
+ * itself fails. Never throws, never touches a paid model.
+ */
+export async function extractImplicitPreferences(
+  transcript: Msg[],
+  deps: ImplicitExtractDeps,
+): Promise<FreshFact[]> {
+  if (!deps.enabled) return [];
+  if (!deps.freeModel || !isFreeModel(deps.freeModel)) return [];
+  const candidates = collectImplicitCandidates(transcript);
+  if (candidates.length === 0) return [];
+  return extractImplicitFacts(candidates, deps.callFreeModel);
+}
+
 const LINE_RE =
   /^-\s*\[(\d{4}-\d{2}-\d{2})\]\s*\((fakta|preferensi|keputusan|hasil)\)\s*(.+)$/;
 
@@ -225,6 +387,82 @@ export function mergeFacts(
   return kept;
 }
 
+/* ---------- relevance-ranked retrieval (Fase 8) ---------- */
+
+// Same tokenization as lessons.ts (kept separate to avoid an import
+// cycle: lessons.ts already imports containsSecret from here).
+const MEMORY_STOPWORDS = new Set([
+  "yang",
+  "dan",
+  "untuk",
+  "dengan",
+  "saya",
+  "aku",
+  "tolong",
+  "buat",
+  "bikin",
+  "buatkan",
+  "bikinin",
+  "dari",
+  "atau",
+  "jangan",
+  "bisa",
+  "sudah",
+  "lagi",
+  "ini",
+  "itu",
+  "apa",
+  "bagaimana",
+  "kenapa",
+]);
+
+function queryTokens(query: string): string[] {
+  const tokens = normalize(query)
+    .split(" ")
+    .filter((t) => t.length >= 3 && !MEMORY_STOPWORDS.has(t));
+  return [...new Set(tokens)];
+}
+
+/**
+ * Ranks memory entries for the current message: keyword overlap with the
+ * query first, newest first on ties — the same pattern as selectLessons.
+ * Entries with no overlap are NOT dropped: they backfill the leftover
+ * budget newest-first, so durable identity facts ("namaku Rizqi") still
+ * reach the prompt when nothing relevant exists, but a relevant old
+ * entry always beats an irrelevant new one. With an empty query (or no
+ * usable tokens) this is plain newest-first, i.e. the old behaviour.
+ */
+export function selectMemoryEntries(
+  entries: MemoryEntry[],
+  query: string,
+  budgetChars: number = MEMORY_INJECT_BUDGET,
+): MemoryEntry[] {
+  const tokens = queryTokens(query);
+  const ranked =
+    tokens.length === 0
+      ? [...entries].sort((a, b) => b.date.localeCompare(a.date))
+      : [...entries]
+          .map((e) => {
+            const text = normalize(e.text);
+            const score = tokens.filter((t) => text.includes(t)).length;
+            return { entry: e, score };
+          })
+          .sort(
+            (a, b) =>
+              b.score - a.score || b.entry.date.localeCompare(a.entry.date),
+          )
+          .map(({ entry }) => entry);
+  const picked: MemoryEntry[] = [];
+  let used = 0;
+  for (const e of ranked) {
+    const line = `- [${e.date}] (${e.kind}) ${e.text}`;
+    if (used + line.length + 1 > budgetChars && picked.length > 0) break;
+    used += line.length + 1;
+    picked.push(e);
+  }
+  return picked;
+}
+
 export interface SessionLine {
   id: string;
   title: string;
@@ -233,26 +471,20 @@ export interface SessionLine {
 
 /**
  * The slice injected into the system prompt at the start of every run:
- * newest memory entries first within MEMORY_INJECT_BUDGET chars, then a
- * one-line list of recent sessions so the agent can reference earlier work
+ * memory entries ranked by relevance to `query` (the current user
+ * message) + recency, within MEMORY_INJECT_BUDGET chars, then a one-line
+ * list of recent sessions so the agent can reference earlier work
  * ("kemarin kamu minta bikinin web X"). Empty string when there is nothing.
+ * With no query the ranking is newest-first (the pre-Fase-8 behaviour).
  */
 export function buildMemoryContext(
   entries: MemoryEntry[],
   sessions: SessionLine[],
   currentSessionId: string | null,
+  query = "",
 ): string {
   const parts: string[] = [];
-  const sorted = [...entries].sort((a, b) => b.date.localeCompare(a.date));
-  const picked: MemoryEntry[] = [];
-  let used = 0;
-  for (const e of sorted) {
-    const line = `- [${e.date}] (${e.kind}) ${e.text}`;
-    if (used + line.length + 1 > MEMORY_INJECT_BUDGET && picked.length > 0)
-      break;
-    used += line.length + 1;
-    picked.push(e);
-  }
+  const picked = selectMemoryEntries(entries, query);
   if (picked.length > 0) {
     parts.push(
       "# Memori dari obrolan sebelumnya (ingat ini saat menjawab)\n" +

@@ -1,13 +1,44 @@
-# Batas Sandbox Bikinin AI (Fase 7, Track D)
+# Batas Sandbox Bikinin AI (Fase 7, Track D — diperbarui Fase 8)
 
 Dokumen ini jujur soal apa yang diblokir sandbox, apa yang TIDAK diblokir,
 dan apa yang wajib dilakukan operator. Klaim di sini didukung test di
-`tests/sandbox.test.ts` (59 test) — bukan sekadar bacaan kode.
+`tests/sandbox.test.ts` (105 test) — bukan sekadar bacaan kode.
+
+## Fase 8 — user namespace via `unshare` (`run_command`)
+
+Sejak Fase 8, `run_command` jalan di dalam user+mount+net+pid namespace via
+`unshare` (`src/tools/run-command.ts`, `execSandboxed`): tanpa network,
+filesystem di luar workspace read-only, `/etc`/`/root`/`/home`/`/tmp`
+ditutup tmpfs kosong, env dibersihkan dari rahasia (`safeEnv`, sama seperti
+`render_video`). `bwrap` TIDAK ada di VM ini — dipakai `unshare` mentah,
+tanpa dependensi baru. Classifier ditambah 4 aturan (curl/wget kirim data,
+netcat/socat, kode inline interpreter, shell bersarang).
+
+Verifikasi (VM ini): `tests/sandbox.test.ts` 105 test (11 live — membuktikan
+baca `/etc/passwd`, curi file luar workspace, dan `curl` gagal di dalam
+sandbox) + `tests/isolation.test.ts` 9 test. `render_video` dan `web_search`
+tidak berubah dan test-nya tetap lolos.
+
+**Batas yang masih berlaku:**
+- Ketersediaan di image Codespace pemilik **belum diverifikasi** — bila
+  `unshare`/user namespace tidak ada di sana, `run_command` gagal tertutup
+  dan butuh `BIKININ_SANDBOX=off` untuk jalan tanpa sandbox. Jangan klaim
+  Codespace ter-sandbox sebelum seseorang menjalankan `unshare -Urm true`
+  di sana.
+- `npm install`/`npm ci` lewat `run_command` GAGAL (tanpa network) — alur
+  bangun website untuk workspace baru jadi butuh jalur instalasi di luar
+  sandbox atau proxy registry (pekerjaan fase berikutnya).
+- `/proc` masih terlihat (environ proses host TIDAK bisa dibaca —
+  terverifikasi). `/dev` dibagi apa adanya (diperlukan `/dev/null`).
+- Sandbox hanya mencakup `run_command`; `render_video`/`web_search`/`git`
+  tidak lewat sandbox ini (sengaja, di luar lingkup).
 
 ## Batas fundamental — baca dulu
 
-Agent berjalan sebagai **user OS yang sama dengan server**. Tidak ada
-container, namespace, atau user terpisah. Akibatnya:
+Agent berjalan sebagai **user OS yang sama dengan server** — KECUALI
+`run_command`, yang sejak Fase 8 jalan di user namespace terpisah (lihat
+bagian di atas, bila `unshare` tersedia di mesin itu). Tidak ada container
+penuh. Akibatnya:
 
 - `node file.js` ada di allowlist `run_command`, dan skrip Node yang ditulis
   agent bisa membaca file apa pun yang bisa dibaca user itu, serta mengakses
@@ -54,10 +85,12 @@ Pengecualian yang dipertahankan: `/dev/null` (`cat /dev/null`,
 
 ## Yang TIDAK diblokir — dan kenapa
 
-- **`node file.js` / `node file.ts`** (allowlist). Skrip Node yang ditulis agent
-  bisa membaca file di luar workspace dan mengakses network. Ini celah yang
-  diketahui dan diterima untuk Fase 7: menutupnya butuh menjalankan kode
-  tidak dipercaya di user/container terpisah, yang di luar lingkup.
+- **`node file.js` / `node file.ts`** (allowlist). Sejak Fase 8, skrip Node
+  yang dijalankan lewat `run_command` berada DI DALAM namespace (tanpa
+  network, filesystem luar workspace read-only) bila `unshare` tersedia —
+  celah Fase 7 ini tertutup di jalur itu. Bila sandbox dimatikan
+  (`BIKININ_SANDBOX=off`) atau `unshare` tidak tersedia, celah lama kembali
+  berlaku: skrip bisa membaca file di luar workspace dan mengakses network.
 - **`HOME` dan `PATH` yang diwariskan dari env server** — sengaja TIDAK
   dibuang `safeEnv`. Keduanya berasal dari env operator (trust domain yang
   sama dengan proses server itu sendiri; anak proses tidak bisa mengubah env
@@ -100,4 +133,7 @@ Pengecualian yang dipertahankan: `/dev/null` (`cat /dev/null`,
   handler itu berubah — dicatat di sini agar tidak hilang.
 - Penutup nyata untuk `node file.js` (menjalankan kode agent sebagai user
   OS terpisah / di container) adalah pekerjaan fase berikutnya, bukan
-  perbaikan regex.
+  perbaikan regex. Fase 8 menutupnya lewat user namespace untuk
+  `run_command` (bila `unshare` tersedia); isolasi container penuh dan
+  jalur instalasi dependensi di dalam sandbox tetap ditunda ke fase
+  berikutnya.

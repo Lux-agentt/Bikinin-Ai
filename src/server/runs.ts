@@ -10,7 +10,7 @@ import {
   type ApprovalRequest,
   type EmitFn,
 } from "../agent/loop.js";
-import type { Config } from "../config.js";
+import { isMemoryModelExtractEnabled, type Config } from "../config.js";
 import type { z } from "zod";
 import {
   createEmitter,
@@ -20,6 +20,7 @@ import {
   type RouteInfo,
 } from "../events.js";
 import type { LlmClient } from "../llm/client.js";
+import { createOpenAiLlm } from "../llm/client.js";
 import { createFallbackLlm } from "../llm/fallback.js";
 import { isRouterEnabled, routeProviders } from "../llm/router.js";
 import type { ProviderConfig } from "../llm/providers.js";
@@ -53,7 +54,12 @@ import {
 } from "./ledger.js";
 import { MAX_SESSIONS, SessionHistory } from "../agent/history.js";
 import { buildLessonsContext, extractLessons } from "../agent/lessons.js";
-import { buildMemoryContext, extractFacts } from "../agent/memory.js";
+import {
+  buildMemoryContext,
+  extractFacts,
+  extractImplicitPreferences,
+  isFreeModel,
+} from "../agent/memory.js";
 import { extractiveSummary } from "../agent/summarize.js";
 
 export interface RunRecord {
@@ -107,6 +113,14 @@ export interface SessionDetail {
 export interface RunManagerOptions {
   workspace: string; // absolute realpath
   systemPrompt: string;
+  /**
+   * Fase 8: rebuilds the system prompt with a FRESH skill list before each
+   * run, so a skill folder added while the server runs appears in the next
+   * run without a restart. Optional: when absent, the startup systemPrompt
+   * is used as before. A builder failure falls back to the startup prompt —
+   * a broken skills dir must never fail a run.
+   */
+  buildSystemPrompt?: () => Promise<string>;
   llm?: LlmClient; // tests inject a fake; production uses the provider list
 }
 
@@ -480,10 +494,19 @@ export class RunManager {
     // Long-term memory + recent sessions, injected into the system prompt so
     // the model sees what it learned in earlier sessions. A failed read
     // means no memory, never a failed run.
-    const memoryBlock = await this.memoryContext(rec.sessionId).catch(() => "");
+    const memoryBlock = await this.memoryContext(rec.sessionId, message).catch(
+      () => "",
+    );
     // Fase 6: episodic lessons relevant to this request, same treatment.
     const lessonsBlock = await this.lessonsContext(message).catch(() => "");
-    const systemPrompt = [this.opts.systemPrompt, memoryBlock, lessonsBlock]
+    // Fase 8: fresh skill list per run (hot reload). A new skills/ folder
+    // added while the server runs is listed here, without a restart; a
+    // broken skills dir falls back to the startup prompt, never a failed run.
+    let basePrompt = this.opts.systemPrompt;
+    if (this.opts.buildSystemPrompt) {
+      basePrompt = await this.opts.buildSystemPrompt().catch(() => basePrompt);
+    }
+    const systemPrompt = [basePrompt, memoryBlock, lessonsBlock]
       .filter((b) => b.length > 0)
       .join("\n\n");
     // Fase 5: checkpoint workspace sebelum run dimulai (best-effort: gagal
@@ -578,14 +601,17 @@ export class RunManager {
   }
 
   /** The memory block for the system prompt: long-term facts + recent sessions. */
-  private async memoryContext(currentSessionId: string): Promise<string> {
+  private async memoryContext(
+    currentSessionId: string,
+    query = "",
+  ): Promise<string> {
     const entries = await readMemoryEntries(this.opts.workspace);
     const sessions = [...this.meta.entries()].map(([id, m]) => ({
       id,
       title: m.title,
       updatedAt: m.updatedAt,
     }));
-    return buildMemoryContext(entries, sessions, currentSessionId);
+    return buildMemoryContext(entries, sessions, currentSessionId, query);
   }
 
   /**
@@ -617,9 +643,13 @@ export class RunManager {
   }
 
   /**
-   * Rule-based long-term memory update from a finished run. Cheap by design:
-   * no model call, only deterministic extraction from the transcript. Writes
-   * nothing when no durable fact was learned.
+   * Long-term memory update from a finished run. Rule-based extraction is
+   * always on and costs nothing. Fase 8 adds an OPTIONAL model-assisted
+   * pass for implicit preferences (flag BIKININ_MEMORY_MODEL_EXTRACT, off by
+   * default): exactly one call, made DIRECTLY against the first `:free`
+   * provider — never through the fallback chain, so it can never spill to a
+   * paid model. Any failure is swallowed; memory stays rule-only.
+   * Writes nothing when no durable fact was learned.
    */
   private async updateMemory(result: AgentResult): Promise<void> {
     const facts = extractFacts(
@@ -629,6 +659,27 @@ export class RunManager {
       result.filesChanged,
       result.status,
     );
+    if (isMemoryModelExtractEnabled(this.cfg.BIKININ_MEMORY_MODEL_EXTRACT)) {
+      const free = this.cfg.providers.find((p) => isFreeModel(p.model));
+      if (free) {
+        const implicit = await extractImplicitPreferences(result.transcript, {
+          enabled: true,
+          freeModel: free.model,
+          callFreeModel: async (prompt) =>
+            (
+              await createOpenAiLlm({
+                baseURL: free.baseUrl,
+                apiKey: free.apiKey,
+              }).chat({
+                model: free.model,
+                messages: [{ role: "user", content: prompt }],
+                tools: [],
+              })
+            ).text,
+        }).catch(() => []);
+        facts.push(...implicit);
+      }
+    }
     if (facts.length === 0) return;
     await appendMemoryFacts(this.opts.workspace, facts);
   }

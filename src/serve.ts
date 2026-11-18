@@ -51,7 +51,30 @@ async function main(): Promise<void> {
     systemPrompt: await loadSystemPrompt(
       formatSkillList(await listSkills(REPO_SKILLS_DIR)),
     ),
+    // Fase 8 (hot reload): the skill list is re-listed fresh before each
+    // run (see RunManager.execute), so a new skills/ folder appears in the
+    // next run without restarting the server. A broken skill is skipped by
+    // listSkills, never fatal.
+    buildSystemPrompt: async () =>
+      loadSystemPrompt(formatSkillList(await listSkills(REPO_SKILLS_DIR))),
   });
+  // Fase 8: watch skills/ and say so when it changes — the next run picks
+  // the change up via buildSystemPrompt above. Best-effort only: a watcher
+  // failure must never stop the server.
+  try {
+    const { watch } = await import("node:fs");
+    const watcher = watch(REPO_SKILLS_DIR, (event, filename) => {
+      console.log(
+        `Skill berubah (${event}${filename ? `: ${filename}` : ""}) — dipakai di run berikutnya tanpa restart.`,
+      );
+    });
+    watcher.on("error", () => {
+      /* watcher is informational only; runs re-list skills anyway */
+    });
+    watcher.unref?.();
+  } catch {
+    /* no watcher (e.g. skills dir unreadable); runs re-list skills anyway */
+  }
   // Restore sessions + metadata saved by earlier runs (workspace/.bikinin/).
   const restored = await manager.init();
   if (restored > 0)

@@ -17,7 +17,19 @@ const LimitsSchema = z.object({
   // Model router (Fase 7): on by default; off/false/0 disables it.
   // Optional so older hand-built Config literals still compile.
   BIKININ_ROUTER: z.string().optional(),
+  // Model-assisted memory extraction (Fase 8): OFF by default. Only
+  // on/true/1 enable it; see isMemoryModelExtractEnabled below.
+  // Optional so older hand-built Config literals still compile.
+  BIKININ_MEMORY_MODEL_EXTRACT: z.string().optional(),
 });
+
+/** BIKININ_MEMORY_MODEL_EXTRACT is OFF by default; only on/true/1 turn it on. */
+export function isMemoryModelExtractEnabled(
+  value: string | undefined,
+): boolean {
+  if (value === undefined) return false;
+  return ["on", "true", "1"].includes(value.trim().toLowerCase());
+}
 
 export interface Config extends z.infer<typeof LimitsSchema> {
   providers: ProviderConfig[];

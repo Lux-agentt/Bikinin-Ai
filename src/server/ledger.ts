@@ -11,15 +11,14 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentEvent } from "../events.js";
+import type { RouteCategory } from "../llm/router.js";
+import { recordRouterOutcome } from "../llm/router.js";
+import { readQuotaSnapshot, type RunQuotaSnapshot } from "../llm/quota.js";
 import { readSessionEvents } from "./event-log.js";
 import { MEMORY_DIR, SESSIONS_DIR } from "./persistence.js";
 
 export type LedgerStatus =
-  | "running"
-  | "completed"
-  | "stopped"
-  | "error"
-  | "budget_exceeded";
+  "running" | "completed" | "stopped" | "error" | "budget_exceeded";
 
 export interface ToolCallStats {
   total: number;
@@ -35,6 +34,10 @@ export interface RunLedger {
   /** First model seen in run_started; models lists every model the run used. */
   model: string;
   models: string[];
+  /** Task category from run_started.route (absent for pre-router runs). */
+  category?: RouteCategory;
+  /** Daily :free pool snapshot at persist time; absent when no :free request was made today. */
+  quota?: RunQuotaSnapshot;
   started_at: string | null;
   finished_at: string | null;
   /** From run_finished.duration_ms when present; while running, wall time since start. */
@@ -149,6 +152,7 @@ export function buildLedgerFromEvents(
     session_id: sessionId,
     model: models[0] ?? started.model,
     models,
+    category: started.route?.category,
     started_at: startedAt,
     finished_at: finished ? finished.ts : null,
     duration_ms: durationMs,
@@ -159,7 +163,12 @@ export function buildLedgerFromEvents(
     output_tokens: output,
     cached_tokens: cached,
     cost_usd: cost,
-    tool_calls: { total: toolTotal, ok: toolOk, failed: toolFailed, by_tool: byTool },
+    tool_calls: {
+      total: toolTotal,
+      ok: toolOk,
+      failed: toolFailed,
+      by_tool: byTool,
+    },
   };
 }
 
@@ -175,9 +184,7 @@ export function buildSessionLedgers(events: AgentEvent[]): RunLedger[] {
     const ledger = buildLedgerFromEvents(events, id);
     if (ledger) out.push(ledger);
   }
-  out.sort((a, b) =>
-    (a.started_at ?? "") < (b.started_at ?? "") ? -1 : 1,
-  );
+  out.sort((a, b) => ((a.started_at ?? "") < (b.started_at ?? "") ? -1 : 1));
   return out;
 }
 
@@ -233,11 +240,32 @@ export async function upsertLedger(
   ledger: RunLedger,
 ): Promise<RunLedger[]> {
   const list = await loadLedger(workspace, sessionId);
+  // Fase 8: attach today's :free pool snapshot (only when a :free request
+  // was actually made today, so pre-quota ledgers stay unchanged) and
+  // record the run's outcome in the router win table. Both are
+  // best-effort: a failure here must never lose the ledger itself.
+  const snap = await readQuotaSnapshot(workspace).catch(() => null);
+  if (snap) ledger.quota = snap;
   const i = list.findIndex((l) => l.run_id === ledger.run_id);
   if (i >= 0) list[i] = ledger;
   else list.push(ledger);
   list.sort((a, b) => ((a.started_at ?? "") < (b.started_at ?? "") ? -1 : 1));
   await saveLedger(workspace, sessionId, list);
+  if (
+    ledger.category &&
+    (ledger.status === "completed" ||
+      ledger.status === "error" ||
+      ledger.status === "budget_exceeded")
+  ) {
+    // The routed first model gets the outcome (it is the model the router
+    // chose). "stopped" is the user's action, not a model signal: skipped.
+    await recordRouterOutcome(workspace, {
+      key: ledger.run_id,
+      model: ledger.model,
+      category: ledger.category,
+      won: ledger.status === "completed",
+    }).catch(() => {});
+  }
   return list;
 }
 
@@ -250,7 +278,5 @@ export async function ledgerFromSessionEvents(
   workspace: string,
   sessionId: string,
 ): Promise<RunLedger[]> {
-  return buildSessionLedgers(
-    await readSessionEvents(workspace, sessionId),
-  );
+  return buildSessionLedgers(await readSessionEvents(workspace, sessionId));
 }

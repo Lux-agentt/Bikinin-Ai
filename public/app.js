@@ -1791,6 +1791,58 @@ document.addEventListener("keydown", (ev) => {
   }
 });
 
+// ---------- Kuota harian :free (Fase 8) ----------
+// Reads the same ledger endpoint as ledger.js and shows today's shared
+// :free pool usage from the latest run's quota snapshot. Hidden when the
+// latest run recorded no :free usage (or no run exists yet). A failed poll
+// never breaks the UI — the last shown text simply stays.
+async function refreshQuotaLine() {
+  const el = $("#quotaLine");
+  if (!el) return;
+  try {
+    const sRes = await fetch("/api/sessions");
+    if (!sRes.ok) return;
+    const sessions = await sRes.json();
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      el.hidden = true;
+      return;
+    }
+    const lRes = await fetch(
+      "/api/sessions/" + sessions[0].session_id + "/ledger",
+    );
+    if (!lRes.ok) return;
+    const ledgers = await lRes.json();
+    const latest =
+      Array.isArray(ledgers) && ledgers.length > 0
+        ? ledgers[ledgers.length - 1]
+        : null;
+    const q = latest && latest.quota;
+    if (!q) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.textContent =
+      "Kuota :free hari ini (UTC " +
+      q.date +
+      "): " +
+      q.free_used +
+      "/" +
+      q.free_limit +
+      " request · run ini: " +
+      latest.llm_calls +
+      " pgl LLM" +
+      (q.free_used >= q.free_limit
+        ? " — kuota habis, run berikutnya pindah provider atau berhenti"
+        : "");
+  } catch (e) {
+    /* keep the last shown text */
+  }
+}
+refreshQuotaLine();
+setInterval(refreshQuotaLine, 15000);
+document.addEventListener("submit", () => setTimeout(refreshQuotaLine, 1500));
+
 // ---------- Boot ----------
 
 bindHero();

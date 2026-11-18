@@ -10,6 +10,12 @@ import type {
   ChatCompletionTool,
 } from "openai/resources/chat/completions";
 import { AgentError } from "../errors.js";
+import {
+  checkAndRecordFreeRequest,
+  isFreeModel,
+  resolveQuotaClient,
+  type QuotaClientOptions,
+} from "./quota.js";
 
 export type ChatMessage = ChatCompletionMessageParam;
 
@@ -82,6 +88,14 @@ export interface LlmOptions {
   timeoutMs?: number;
   maxRetries?: number;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Daily :free quota gate (Fase 8). When omitted, the gate resolves from
+   * env (BIKININ_WORKSPACE for the counter dir, BIKININ_FREE_DAILY_LIMIT,
+   * BIKININ_QUOTA=off to disable) and is ON: the fallback client builds
+   * its clients without opts, so env is the only wiring that covers main
+   * runs and subagents alike. Tests pass an explicit workspace instead.
+   */
+  quota?: QuotaClientOptions;
 }
 
 const defaultSleep = (ms: number) =>
@@ -178,10 +192,24 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
   });
   const maxRetries = opts.maxRetries ?? 3;
   const sleep = opts.sleep ?? defaultSleep;
+  const quota = resolveQuotaClient(opts.quota);
+
+  /**
+   * Daily :free quota gate. Runs BEFORE the HTTP request is sent and
+   * OUTSIDE the retry try/catch below, so an exhausted pool throws a
+   * fallback-eligible error straight to the fallback chain (next provider)
+   * instead of being retried or re-wrapped into a generic provider error.
+   * Non-free models are never counted.
+   */
+  function chargeQuota(model: string): void {
+    if (!quota.enabled || !isFreeModel(model)) return;
+    checkAndRecordFreeRequest(quota.workspace, model, quota.dailyFreeLimit);
+  }
 
   return {
     async chat(p) {
       for (let attempt = 0; ; attempt++) {
+        chargeQuota(p.model);
         let received = false;
         try {
           const stream = await client.chat.completions.create(
@@ -267,6 +295,7 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
         );
       }
       for (let attempt = 0; ; attempt++) {
+        chargeQuota(model);
         try {
           const res = await client.chat.completions.create(
             {
