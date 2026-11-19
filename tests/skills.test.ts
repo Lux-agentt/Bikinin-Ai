@@ -192,8 +192,18 @@ describe("system prompt wiring", () => {
   it("lists the real website and remotion skills and nothing else is leaked", async () => {
     const skills = await listSkills(REPO_SKILLS_DIR);
     expect(skills.map((s) => s.name)).toEqual([
+      "brand-voice",
+      "bug-bounty-reporting",
+      "bug-bounty-scope",
       "bug-bounty-writeups",
+      "codebase-maintenance",
+      "content-calendar",
+      "content-repurpose",
+      "instagram-content",
       "remotion",
+      "remotion-short-form",
+      "seo-content",
+      "web-research",
       "web3-ai-tools",
       "web3-bug-classes",
       "web3-case-study-role-misconfig",
@@ -206,6 +216,7 @@ describe("system prompt wiring", () => {
       "web3-start-here",
       "web3-triage-report",
       "website",
+      "website-qa",
     ]);
     expect(skills.find((s) => s.name === "website")).toEqual({
       name: "website",
