@@ -78,12 +78,11 @@
         }
       });
     }
-    var composer = document.querySelector(".composer");
-    if (composer && composer.parentNode) {
-      composer.parentNode.insertBefore(el, composer);
-    } else {
-      document.body.appendChild(el);
-    }
+    // Panel tinggal di dalam chat (ujung stage) supaya ikut ke-scroll dan
+    // tidak nempel permanen di bawah chat. Kalau #main tidak ada, jatuh ke body.
+    var stage = document.querySelector("#main");
+    if (stage) stage.appendChild(el);
+    else document.body.appendChild(el);
     return el;
   }
 
@@ -102,16 +101,18 @@
   }
 
   function render(latest) {
-    if (!panel) panel = buildPanel();
     var q = function (role) {
       return panel.querySelector('[data-role="' + role + '"]');
     };
     if (!latest) {
+      // Belum ada run: jangan tampilkan panel kosong di chat.
+      if (!panel) return;
       q("status").textContent = "—";
       q("foot").textContent = "Belum ada run.";
       setCollapsed(false, false);
       return;
     }
+    if (!panel) panel = buildPanel();
     q("status").textContent = STATUS_LABEL[latest.status] || latest.status;
     q("status").dataset.status = latest.status;
     q("model").textContent =
@@ -159,6 +160,10 @@
     }
     if (manual === null) setCollapsed(latest.status !== "running", false);
     else setCollapsed(!manual, false);
+    // Jaga panel tetap di ujung bawah chat (pesan baru masuk di bawahnya saat
+    // run jalan; kalau stage sempat dibersihkan app.js, panel nempel lagi).
+    var stage = document.querySelector("#main");
+    if (stage) stage.appendChild(panel);
   }
 
   function runActive() {
@@ -212,7 +217,7 @@
     } catch (e) {
       /* keep the default rate */
     }
-    panel = buildPanel();
+    // Panel dibuat render() saat ada run pertama (jangan tampil kosong).
     // Refresh sooner when the user sends a prompt (a new run starts).
     document.addEventListener("submit", function () {
       lastKey = "";

@@ -1167,29 +1167,6 @@ main::-webkit-scrollbar {
   color: #fda4af;
   margin-top: 3px;
   line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-.error-actions {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 7px;
-}
-.switch-model-btn {
-  flex: none;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid var(--line-2);
-  background: var(--panel-2);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.switch-model-btn:hover {
-  background: rgba(93, 139, 255, 0.16);
 }
 .retry-btn {
   flex: none;
@@ -1212,15 +1189,6 @@ main::-webkit-scrollbar {
 }
 .retry-btn:active {
   transform: scale(0.95);
-}
-@media (max-width: 480px) {
-  .error-card {
-    align-items: flex-start;
-  }
-  .error-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
 }
 
 /* ===== POST-COMPLETION STREAMING EXPLANATION ===== */
@@ -2533,6 +2501,10 @@ main::-webkit-scrollbar {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--panel);
+}
+/* Di dalam chat (stage sudah punya padding + gap sendiri): tanpa margin luar. */
+main .ledger-panel {
+  margin: 0;
 }
 .ledger-head {
   cursor: pointer;
