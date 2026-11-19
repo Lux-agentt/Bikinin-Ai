@@ -116,6 +116,8 @@ export interface LlmOptions {
 const defaultSleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+let generatedCallId = 0;
+
 /** Provider's own error detail, truncated — a bare status makes 400s
  *  undiagnosable (live eval Gemini 2026-11-18: the first request was
  *  accepted, a later one 400'd, and the body was discarded). */
@@ -461,7 +463,7 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
             .sort(([a], [b]) => a - b)
             .filter(([, s]) => s.name !== "")
             .map(([i, s]): ToolCallReq => ({
-              id: s.id || `call_${i}`,
+              id: s.id || `call_bikinin_${generatedCallId++}_${i}`,
               type: "function",
               function: { name: s.name, arguments: s.args || "{}" },
               ...(s.thoughtSignature
