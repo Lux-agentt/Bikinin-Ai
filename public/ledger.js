@@ -50,8 +50,11 @@
     el.id = "ledgerPanel";
     el.setAttribute("aria-label", "Biaya dan waktu run");
     el.innerHTML =
-      '<div class="ledger-head"><b>Biaya run</b>' +
-      '<span class="ledger-status" data-role="status">—</span></div>' +
+      '<div class="ledger-head" role="button" tabindex="0" aria-expanded="true" title="Ketuk untuk melipat / membuka rincian biaya">' +
+      "<b>Biaya run</b>" +
+      '<span class="ledger-summary" data-role="summary" hidden></span>' +
+      '<span class="ledger-status" data-role="status">—</span>' +
+      '<svg class="ledger-chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></div>' +
       '<div class="ledger-grid">' +
       '<div><span>Model</span><b data-role="model">—</b></div>' +
       '<div><span>Token in / out</span><b data-role="tokens">—</b></div>' +
@@ -62,6 +65,19 @@
       "</div>" +
       '<div class="ledger-tools" data-role="bytool" hidden></div>' +
       '<div class="ledger-foot" data-role="foot">Belum ada run.</div>';
+    var head = el.querySelector(".ledger-head");
+    var toggle = function () {
+      setCollapsed(!el.classList.contains("collapsed"), true);
+    };
+    if (head) {
+      head.addEventListener("click", toggle);
+      head.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggle();
+        }
+      });
+    }
     var composer = document.querySelector(".composer");
     if (composer && composer.parentNode) {
       composer.parentNode.insertBefore(el, composer);
@@ -69,6 +85,20 @@
       document.body.appendChild(el);
     }
     return el;
+  }
+
+  // manual: null = ikut aturan otomatis (run selesai -> lipat, run jalan ->
+  // buka), true/false = pilihan terakhir user, selalu dihormati render().
+  var manual = null;
+
+  function setCollapsed(collapsed, byUser) {
+    if (!panel) return;
+    if (byUser) manual = !collapsed;
+    panel.classList.toggle("collapsed", collapsed);
+    var head = panel.querySelector(".ledger-head");
+    if (head) head.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    var summary = panel.querySelector('[data-role="summary"]');
+    if (summary) summary.hidden = !collapsed;
   }
 
   function render(latest) {
@@ -79,6 +109,7 @@
     if (!latest) {
       q("status").textContent = "—";
       q("foot").textContent = "Belum ada run.";
+      setCollapsed(false, false);
       return;
     }
     q("status").textContent = STATUS_LABEL[latest.status] || latest.status;
@@ -120,6 +151,14 @@
       "Run " + latest.run_id +
       (latest.started_at ? " · mulai " + new Date(latest.started_at).toLocaleTimeString("id-ID") : "") +
       " · biaya dihitung dari harga token provider (bukan dari field biaya provider).";
+    // Panel lipat: run selesai -> ringkas (hemat layar HP), run jalan -> buka.
+    var summary = q("summary");
+    if (summary) {
+      summary.textContent =
+        fmtUsd(latest.cost_usd) + " · " + fmtDur(latest.duration_ms);
+    }
+    if (manual === null) setCollapsed(latest.status !== "running", false);
+    else setCollapsed(!manual, false);
   }
 
   function runActive() {
