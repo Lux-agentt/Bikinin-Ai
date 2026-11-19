@@ -1367,6 +1367,10 @@ $("#closeOverlay").addEventListener("click", closeOverlay);
 // ---------- Approval ----------
 
 function openApproval(e) {
+  // Jangan buka lembar izin saat memutar ulang riwayat: persetujuan lama
+  // sudah tidak hidup (tidak ada run yang menunggu), dan menjawabnya
+  // diam-diam gagal karena state.runId kosong.
+  if (state.replaying) return;
   state.approvalId = e.approval_id;
   $("#approveReason").textContent = `${e.reason} (risiko ${e.risk})`;
   $("#approveCmd").textContent = e.command || "";
@@ -1380,7 +1384,13 @@ function closeApproval() {
 }
 
 async function answer(decision) {
-  if (!state.runId || !state.approvalId) return;
+  if (!state.runId || !state.approvalId) {
+    // Lembar izin basi (mis. dari riwayat atau run sudah selesai):
+    // jangan diam saja — tutup dan beri tahu kenapa tombol tidak jalan.
+    closeApproval();
+    toast("Persetujuan ini sudah tidak aktif. Mulai run baru untuk melanjutkan.");
+    return;
+  }
   const approvalId = state.approvalId;
   closeApproval();
   try {
