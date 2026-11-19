@@ -913,4 +913,73 @@ describe("web server", () => {
         .status,
     ).toBe(413);
   });
+
+  it("deletes a session (transcript + ledger) and 404s afterwards", async () => {
+    const { url, workspace } = await boot([finalText("ok")]);
+    const started = await post(`${url}/api/runs`, { message: "buat halaman" });
+    const { run_id, session_id } = (await started.json()) as {
+      run_id: string;
+      session_id: string;
+    };
+    await (await fetch(`${url}/api/runs/${run_id}/events`)).text();
+    const sessDir = join(workspace, ".bikinin", "sessions");
+    // The session file is written when the run finishes; the SSE stream
+    // can close just before the write lands, so wait for it.
+    await waitFor(() => exists(join(sessDir, `${session_id}.json`)));
+    await waitFor(() => exists(join(sessDir, `${session_id}.jsonl`)));
+    expect(await exists(join(sessDir, `${session_id}.json`))).toBe(true);
+    expect(await exists(join(sessDir, `${session_id}.jsonl`))).toBe(true);
+
+    const del = await fetch(`${url}/api/sessions/${session_id}`, {
+      method: "DELETE",
+    });
+    expect(del.status).toBe(200);
+    expect((await fetch(`${url}/api/sessions/${session_id}`)).status).toBe(
+      404,
+    );
+    // The old run's event stream is gone too.
+    expect((await fetch(`${url}/api/runs/${run_id}/events`)).status).toBe(404);
+    expect(await exists(join(sessDir, `${session_id}.json`))).toBe(false);
+    expect(await exists(join(sessDir, `${session_id}.jsonl`))).toBe(false);
+    expect(await exists(join(sessDir, `${session_id}.ledger.json`))).toBe(
+      false,
+    );
+    const list = (await (
+      await fetch(`${url}/api/sessions`)
+    ).json()) as Array<{ session_id: string }>;
+    expect(list).toHaveLength(0);
+
+    expect(
+      (await fetch(`${url}/api/sessions/s_deadbeef`, { method: "DELETE" }))
+        .status,
+    ).toBe(404);
+  });
+
+  it("refuses to delete a session with an active run", async () => {
+    const base = await mkdtemp(join(tmpdir(), "bikinin-delbusy-"));
+    await mkdir(join(base, "ws"));
+    const workspace = await realpath(join(base, "ws"));
+    let release!: () => void;
+    const hanging = new Promise<ChatResult>((resolve) => {
+      release = () => resolve(finalText("ok"));
+    });
+    const manager = new RunManager(
+      { ...cfg },
+      {
+        workspace,
+        systemPrompt: "sys",
+        llm: { chat: () => hanging },
+      },
+    );
+    const { run_id, session_id } = manager.start({
+      message: "tahan",
+      attachment_ids: [],
+      effort: "sedang",
+    });
+    expect(await manager.deleteSession(session_id)).toBe("busy");
+    release();
+    await waitFor(() => manager.get(run_id)?.finished === true);
+    expect(await manager.deleteSession(session_id)).toBe("ok");
+    expect(await manager.deleteSession(session_id)).toBe("not-found");
+  });
 });

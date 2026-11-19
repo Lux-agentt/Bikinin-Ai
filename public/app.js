@@ -514,7 +514,36 @@ function renderSheetHistory() {
         dl.setAttribute("aria-label", "Unduh proyek sebagai ZIP");
         dl.innerHTML =
           '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>';
-        item.append(mainEl, dl);
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "exp-del";
+        del.title = "Hapus riwayat ini";
+        del.setAttribute("aria-label", `Hapus riwayat ${sess.title}`);
+        del.innerHTML =
+          '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+        del.addEventListener("click", async () => {
+          if (
+            !confirm(
+              `Hapus riwayat "${sess.title}"? Percakapan sesi ini ikut terhapus dari server. File proyek di workspace tetap ada.`,
+            )
+          )
+            return;
+          const r = await fetch(`/api/sessions/${sess.session_id}`, {
+            method: "DELETE",
+          });
+          if (r.status === 409) {
+            toast("Masih ada run yang berjalan di sesi ini.");
+            return;
+          }
+          if (!r.ok) {
+            toast("Gagal menghapus riwayat.");
+            return;
+          }
+          if (state.sessionId === sess.session_id) resetSession();
+          else void renderSheetHistory();
+          toast("Riwayat dihapus.");
+        });
+        item.append(mainEl, dl, del);
         box.appendChild(item);
       }
     })

@@ -288,6 +288,18 @@ async function route(
     return sendJson(res, 200, manager.listSessions());
   }
 
+  const del = path.match(/^\/api\/sessions\/(s_[a-f0-9]{8})$/);
+  if (method === "DELETE" && del) {
+    const r = await manager.deleteSession(del[1]);
+    if (r === "not-found") throw new HttpError(404, "sesi tidak ditemukan");
+    if (r === "busy")
+      throw new HttpError(
+        409,
+        "masih ada run yang berjalan di sesi ini — hentikan dulu",
+      );
+    return sendJson(res, 200, { ok: true });
+  }
+
   if (method === "GET" && path === "/api/skills") {
     return sendJson(res, 200, await listSkills(REPO_SKILLS_DIR));
   }

@@ -275,6 +275,7 @@ Satu format pesan untuk **CLI** dan **UI**. Agent hanya memanggil `emit(type, da
 | POST   | `/api/runs/:id/resume`           | Lanjutkan run `budget_exceeded` setelah pengguna menaikkan batas                                         |
 | GET    | `/api/sessions`                  | Daftar sesi (untuk panel Riwayat)                                                                        |
 | GET    | `/api/sessions/:id`              | Replay: seluruh kejadian sesi                                                                            |
+| DELETE | `/api/sessions/:id`              | Hapus sesi (transkrip + ledger); 404 bila tidak ada, 409 bila masih ada run yang berjalan di sesi itu    |
 | GET    | `/api/sessions/:id/files`        | Pohon file workspace sesi                                                                                |
 | GET    | `/api/sessions/:id/download.zip` | Unduh proyek                                                                                             |
 | GET    | `/api/sessions/:id/download?path=` | Unduh satu file sebagai attachment (mis. video MP4), tanpa batas 5 MB seperti zip; path di dalam workspace, file rahasia ditolak |

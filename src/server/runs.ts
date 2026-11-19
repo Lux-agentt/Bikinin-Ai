@@ -2,7 +2,7 @@
 // One active run at a time, because all runs share one workspace.
 import { randomUUID } from "node:crypto";
 import { statSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, rm, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   runAgent,
@@ -29,7 +29,7 @@ import type { ProviderConfig } from "../llm/providers.js";
 import {
   appendLessons,
   appendMemoryFacts,
-  deleteSession,
+  deleteSession as deletePersistedSession,
   loadSessions,
   pruneSessions,
   readLessonEntries,
@@ -49,6 +49,7 @@ import {
 } from "./checkpoints.js";
 import {
   buildLedgerFromEvents,
+  ledgerFilePath,
   ledgerFromSessionEvents,
   loadLedger,
   upsertLedger,
@@ -198,6 +199,32 @@ export class RunManager {
         last_status: m.lastStatus,
       }))
       .sort((a, b) => b.updated_at - a.updated_at);
+  }
+
+  /**
+   * Deletes a session: memory (meta + finished run records), the
+   * persisted .json + .jsonl log, and the ledger file. The shared
+   * workspace files stay — only the chat transcript goes. Refuses when
+   * a run of this session is still active; stop it first.
+   */
+  async deleteSession(
+    sessionId: string,
+  ): Promise<"ok" | "not-found" | "busy"> {
+    const m = this.meta.get(sessionId);
+    if (!m) return "not-found";
+    const active =
+      this.activeRunId !== null
+        ? this.runs.get(this.activeRunId)
+        : undefined;
+    if (active && active.sessionId === sessionId) return "busy";
+    for (const runId of m.runIds) this.runs.delete(runId);
+    this.sessions.delete(sessionId);
+    this.meta.delete(sessionId);
+    await deletePersistedSession(this.opts.workspace, sessionId);
+    await rm(ledgerFilePath(this.opts.workspace, sessionId), {
+      force: true,
+    });
+    return "ok";
   }
 
   /** One session with every run's events, for replay in the UI.
@@ -439,7 +466,7 @@ export class RunManager {
         if (oldest === undefined) break;
         this.sessions.delete(oldest);
         this.meta.delete(oldest);
-        void deleteSession(this.opts.workspace, oldest).catch(() => {});
+        void deletePersistedSession(this.opts.workspace, oldest).catch(() => {});
       }
     }
     const m = this.meta.get(sessionId);
