@@ -209,17 +209,26 @@ function isUnsupportedImageError(err: unknown): boolean {
   return /image|vision|multimodal/i.test(err.message);
 }
 
-/** Gemini thought signature from a streamed tool-call delta, if present.
- *  Google's OpenAI-compat layer sends it as
+/** Gemini thought signature from a streamed tool-call or message delta,
+ *  if present. Google's OpenAI-compat layer sends it as
  *  `extra_content.google.thought_signature` (a flat `thought_signature`
- *  is accepted too). Opaque: carried verbatim, never inspected. */
+ *  is accepted too). Live eval 2026-11-19 showed the message-level
+ *  signature never arrives on streamed deltas, so also accept the
+ *  camelCase key inside `google` and an array-shaped `extra_content` —
+ *  cheap tolerance for a field whose exact wire shape is undocumented.
+ *  Opaque: carried verbatim, never inspected. */
 function readThoughtSignature(tc: unknown): string | undefined {
   if (!tc || typeof tc !== "object") return undefined;
-  const extra = (
-    tc as { extra_content?: { google?: { thought_signature?: unknown } } }
-  ).extra_content;
-  const fromExtra = extra?.google?.thought_signature;
-  if (typeof fromExtra === "string" && fromExtra) return fromExtra;
+  const raw = (tc as { extra_content?: unknown }).extra_content;
+  const extras = Array.isArray(raw) ? raw : [raw];
+  for (const extra of extras) {
+    const google = (
+      extra as { google?: Record<string, unknown> } | null | undefined
+    )?.google;
+    if (!google || typeof google !== "object") continue;
+    const sig = google.thought_signature ?? google.thoughtSignature;
+    if (typeof sig === "string" && sig) return sig;
+  }
   const flat = tc as {
     thought_signature?: unknown;
     thoughtSignature?: unknown;
@@ -259,12 +268,20 @@ export function echoToolCalls(
  * edge-missing-file, edge-unicode — the provider only says "Request
  * contains an invalid argument", so the shape, not the message, pointed
  * at the missing turn signature).
+ *
+ * No tool calls in this turn means NO `tool_calls` key at all — not an
+ * empty array. Live eval 2026-11-19: both edge tasks still 400'd with
+ * tool signatures present but no message signature ever captured, and
+ * the pure-text turns in between were echoed as `tool_calls: []`;
+ * a strict validator may reject the empty array, so it is omitted.
  */
 export function echoAssistantMessage(res: ChatResult): ChatMessage {
   const msg: ChatMessage = {
     role: "assistant",
     content: res.text || "",
-    tool_calls: echoToolCalls(res.toolCalls),
+    ...(res.toolCalls.length > 0
+      ? { tool_calls: echoToolCalls(res.toolCalls) }
+      : {}),
   };
   if (!res.messageThoughtSignature) return msg;
   return {
@@ -283,17 +300,17 @@ function isGeminiBaseUrl(baseURL: string): boolean {
 function shapeSummary(messages: ChatMessage[]): string {
   return messages
     .map((m) => {
-      if (m.role === "assistant" && "tool_calls" in m && m.tool_calls) {
-        const sigs = m.tool_calls.filter(
-          (tc) => "extra_content" in (tc as unknown as Record<string, unknown>),
-        ).length;
-        const hasText =
-          typeof m.content === "string" && m.content.length > 0;
-        const msgSig =
-          "extra_content" in (m as unknown as Record<string, unknown>) ? 1 : 0;
-        return `asst{${hasText ? "text" : "notext"},tools:${m.tool_calls.length},sig:${sigs},msgsig:${msgSig}}`;
-      }
-      return m.role;
+      if (m.role !== "assistant") return m.role;
+      const toolCalls =
+        "tool_calls" in m && Array.isArray(m.tool_calls) ? m.tool_calls : [];
+      const sigs = toolCalls.filter(
+        (tc) => "extra_content" in (tc as unknown as Record<string, unknown>),
+      ).length;
+      const hasText =
+        typeof m.content === "string" && m.content.length > 0;
+      const msgSig =
+        "extra_content" in (m as unknown as Record<string, unknown>) ? 1 : 0;
+      return `asst{${hasText ? "text" : "notext"},tools:${toolCalls.length},sig:${sigs},msgsig:${msgSig}}`;
     })
     .join(",");
 }
@@ -305,15 +322,16 @@ function shapeSummary(messages: ChatMessage[]): string {
  */
 function stripForeignExtraContent(messages: ChatMessage[]): ChatMessage[] {
   return messages.map((m) => {
-    if (m.role !== "assistant" || !("tool_calls" in m) || !m.tool_calls)
-      return m;
+    if (m.role !== "assistant") return m;
     const copy = { ...m } as unknown as Record<string, unknown>;
     delete copy.extra_content;
-    copy.tool_calls = m.tool_calls.map((tc) =>
-      tc.type === "function"
-        ? { id: tc.id, type: "function" as const, function: tc.function }
-        : tc,
-    );
+    if ("tool_calls" in m && Array.isArray(m.tool_calls)) {
+      copy.tool_calls = m.tool_calls.map((tc) =>
+        tc.type === "function"
+          ? { id: tc.id, type: "function" as const, function: tc.function }
+          : tc,
+      );
+    }
     return copy as unknown as ChatMessage;
   });
 }

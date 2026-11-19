@@ -297,4 +297,136 @@ describe("Gemini thought signature round-trip", () => {
       },
     );
   });
+
+  it("omits tool_calls when the turn made no tool calls", () => {
+    // A pure-text turn echoed as tool_calls: [] is a second 400 suspect
+    // (live eval Gemini 2026-11-19: edge tasks still 400 with tool
+    // signatures present but no message signature ever captured).
+    const msg = echoAssistantMessage({
+      text: "Selesai.",
+      toolCalls: [],
+      usage: { input_tokens: 0, output_tokens: 0, cached_tokens: 0 },
+    });
+    expect(msg.content).toBe("Selesai.");
+    expect(msg).not.toHaveProperty("tool_calls");
+  });
+
+  it("keeps a text turn's signature without tool_calls", () => {
+    const msg = echoAssistantMessage({
+      text: "Selesai.",
+      toolCalls: [],
+      usage: { input_tokens: 0, output_tokens: 0, cached_tokens: 0 },
+      messageThoughtSignature: "sig-teks",
+    });
+    expect(msg).not.toHaveProperty("tool_calls");
+    expect(
+      (msg as { extra_content?: { google?: { thought_signature?: string } } })
+        .extra_content?.google?.thought_signature,
+    ).toBe("sig-teks");
+  });
+
+  it("captures a camelCase message signature from a text delta", async () => {
+    const camelChunk = JSON.stringify({
+      id: "chatcmpl-test",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "test-model",
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: "assistant",
+            content: "Selesai.",
+            extra_content: { google: { thoughtSignature: "sig-camel" } },
+          },
+          finish_reason: null,
+        },
+      ],
+    });
+    await withSseServer(
+      [[camelChunk, finishChunk("stop")]],
+      "/v1",
+      async (_bodies, baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const r = await llm.chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "hi" }],
+          tools: [],
+        });
+        expect(r.text).toBe("Selesai.");
+        expect(r.messageThoughtSignature).toBe("sig-camel");
+      },
+    );
+  });
+
+  it("strips a text turn's extra_content for a non-Gemini provider", async () => {
+    await withSseServer(
+      [
+        [textChunk("Selesai."), finishChunk("stop")],
+        [textChunk("ok"), finishChunk("stop")],
+      ],
+      "/v1",
+      async (bodies, baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const first = await llm.chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "hi" }],
+          tools: [],
+        });
+        // Simulate a captured message signature on a text-only turn.
+        const messages: ChatMessage[] = [
+          { role: "user", content: "hi" },
+          echoAssistantMessage({
+            ...first,
+            messageThoughtSignature: "sig-teks",
+          }),
+          { role: "user", content: "lanjut" },
+        ];
+        await llm.chat({ model: "test-model", messages, tools: [] });
+        expect(bodies).toHaveLength(2);
+        const second = bodies[1] as CapturedBody;
+        const asst = second.messages[1] ?? {};
+        expect(asst).not.toHaveProperty("extra_content");
+        expect(asst).not.toHaveProperty("tool_calls");
+      },
+    );
+  });
+
+  it("reports msgsig for a text-only turn in the 400 fingerprint", async () => {
+    await withErrorServer(
+      400,
+      { error: { message: "Request contains an invalid argument." } },
+      async (baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const messages: ChatMessage[] = [
+          { role: "user", content: "hi" },
+          {
+            role: "assistant",
+            content: "Selesai.",
+            extra_content: {
+              google: { thought_signature: "sig-teks" },
+            },
+          } as ChatMessage,
+          { role: "user", content: "lanjut" },
+        ];
+        await expect(
+          llm.chat({ model: "test-model", messages, tools: [] }),
+        ).rejects.toThrow(
+          /riwayat: user,asst\{text,tools:0,sig:0,msgsig:1\},user/,
+        );
+      },
+    );
+  });
 });
