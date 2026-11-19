@@ -83,8 +83,30 @@ describe("command substitution and env dumping (Fase 1)", () => {
     expect(classifyCommand(cmd).decision).toBe("block");
   });
 
-  it("does not block env as a grep pattern or a filename", () => {
+  it("does not block env as a grep pattern, but blocks .env as a file", () => {
     expect(classifyCommand("grep env file.txt").decision).toBe("allow");
-    expect(classifyCommand("cat .env").decision).toBe("allow");
+    // Dulu "allow" — diubah 2026-11-19 (perketat lapisan lain pengganti
+    // sandbox di Codespace): `cat` ada di allowlist, jadi tanpa aturan
+    // block, `cat .env` jalan tanpa bertanya.
+    expect(classifyCommand("cat .env").decision).toBe("block");
   });
+
+  it.each([
+    "cat .env",
+    "cat .env.local",
+    "cat ./sub/.env",
+    "head key.pem",
+    "cat id_rsa",
+    "cat credentials.json",
+    "cat x.env",
+  ])("blocks secret file in %s", (cmd) => {
+    expect(classifyCommand(cmd).decision).toBe("block");
+  });
+
+  it.each(["cat .env.example", "cat .env.sample", "npm run env"])(
+    "does not block %s",
+    (cmd) => {
+      expect(classifyCommand(cmd).decision).not.toBe("block");
+    },
+  );
 });

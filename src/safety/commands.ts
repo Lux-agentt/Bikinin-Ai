@@ -73,6 +73,27 @@ const BLOCKED: Array<{ re: RegExp; reason: string }> = [
     reason: "env/printenv tidak diizinkan",
   },
   {
+    // File rahasia di dalam workspace (.env, kunci privat, kredensial):
+    // `cat` ada di allowlist, jadi tanpa aturan ini `cat .env` jalan tanpa
+    // bertanya. Aturan block diperiksa sebelum allowlist, jadi pola ini
+    // menutup celah itu. ".env.example" (template tanpa rahasia) sengaja
+    // tidak tertangkap lewat lookahead negatif. "x.env" ikut tertangkap —
+    // itu memang file dotenv.
+    re: /\.env(?!\.(example|sample|template|dist)\b)(\.[A-Za-z0-9_-]+)?($|[\s;|&"'`\/])/,
+    reason: "file rahasia .env tidak boleh dibaca dari perintah",
+  },
+  {
+    // Kunci privat / sertifikat sebagai argumen perintah (cat key.pem, dst).
+    re: /\.(pem|key|p12|pfx)($|[\s;|&"'`\/])/,
+    reason: "file kunci/sertifikat tidak boleh dibaca dari perintah",
+  },
+  {
+    // Nama file kunci tanpa ekstensi (id_rsa, id_ed25519, ...) dan file
+    // kredensial (credentials.json, ...).
+    re: /(^|[\s;|&"'`=\/.(])(id_(rsa|ed25519|ecdsa|dsa)|credentials[\w.-]*\.(json|yaml|yml|txt))($|[\s;|&"'`\/])/,
+    reason: "file kunci/kredensial tidak boleh dibaca dari perintah",
+  },
+  {
     re: /(^|[\s;&|])(git|gh|ssh|scp|rsync)(\s|$)/,
     reason: "git/gh/ssh tidak diizinkan dari agent",
   },

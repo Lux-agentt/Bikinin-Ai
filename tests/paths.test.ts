@@ -85,4 +85,32 @@ describe("resolveInWorkspace", () => {
       resolveInWorkspace(ws, "a\0b.txt"),
     ).rejects.toMatchObject({ code: "path_blocked" });
   });
+
+  it.each([".env", ".env.local", "sub/.env", "key.pem", "id_rsa", "credentials.json", "notes-secret.txt"])(
+    "blocks secret file %s",
+    async (rel) => {
+      const { ws } = await setup();
+      await expect(resolveInWorkspace(ws, rel)).rejects.toMatchObject({
+        code: "path_blocked",
+      });
+    },
+  );
+
+  it.each([".env.example", ".env.sample", "notes.txt", "src/index.ts"])(
+    "allows non-secret file %s",
+    async (rel) => {
+      const { ws } = await setup();
+      const r = await resolveInWorkspace(ws, rel);
+      expect(r.rel).toBe(rel);
+    },
+  );
+
+  it("blocks a symlink inside the workspace that points to a secret file", async () => {
+    const { ws } = await setup();
+    await writeFile(join(ws, ".env"), "KUNCI=PALSU");
+    await symlink(join(ws, ".env"), join(ws, "alias.txt"));
+    await expect(resolveInWorkspace(ws, "alias.txt")).rejects.toMatchObject({
+      code: "path_blocked",
+    });
+  });
 });

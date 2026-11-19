@@ -20,11 +20,18 @@ sandbox) + `tests/isolation.test.ts` 9 test. `render_video` dan `web_search`
 tidak berubah dan test-nya tetap lolos.
 
 **Batas yang masih berlaku:**
-- Ketersediaan di image Codespace pemilik **belum diverifikasi** — bila
-  `unshare`/user namespace tidak ada di sana, `run_command` gagal tertutup
-  dan butuh `BIKININ_SANDBOX=off` untuk jalan tanpa sandbox. Jangan klaim
-  Codespace ter-sandbox sebelum seseorang menjalankan `unshare -Urm true`
-  di sana.
+- Ketersediaan di image Codespace pemilik **TERBUKTI TIDAK ADA** (2026-11-18:
+  `unshare -Urm true` → "Operation not permitted" — container Codespace
+  memblokir user namespace). Server di Codespace jalan dengan
+  `BIKININ_SANDBOX=off`: perintah jalan langsung (classifier + cwd jail
+  saja). Lapis pengganti sejak 2026-11-19 (bukan sandbox, tapi menutup
+  celah terbesarnya): file rahasia (`.env`, `*.pem`/`*.key`, `id_rsa*`,
+  `credentials*`, `*secret*`, isi `.ssh/`) tidak bisa dibaca/ditulis
+  agent — diblokir di `resolveInWorkspace` (semua tool file + serving
+  HTTP, termasuk lewat symlink) dan di classifier `run_command`
+  (`cat .env` dkk. kini block, dulu allow). Template `.env.example`
+  tetap boleh dibaca. Verifikasi: `tests/paths.test.ts` +
+  `tests/commands.test.ts` + `tests/sandbox.test.ts`.
 - `npm install`/`npm ci` lewat `run_command` GAGAL (tanpa network) —
   DISELESAIKAN Fase 9: jalur install khusus di luar sandbox (lihat bagian
   Fase 9 di bawah). `BIKININ_SANDBOX=off` tidak lagi dibutuhkan untuk

@@ -105,7 +105,6 @@ describe("sandbox: perintah sah tetap jalan", () => {
     "npx vitest run tests/sandbox.test.ts",
     "ls -la",
     "cat index.html",
-    "cat .env",
     "grep env file.txt",
     "grep -r TODO src/",
     "echo hello world",
@@ -119,6 +118,12 @@ describe("sandbox: perintah sah tetap jalan", () => {
     "cat a..b",
   ])("allows %s", (cmd) => {
     expect(classifyCommand(cmd).decision).toBe("allow");
+  });
+
+  it("blocks cat .env — file rahasia, bukan perintah sah (2026-11-19)", () => {
+    // Dulu ada di daftar allows di atas; diubah saat perketat lapisan lain
+    // pengganti sandbox di Codespace.
+    expect(classifyCommand("cat .env").decision).toBe("block");
   });
 
   it.each([

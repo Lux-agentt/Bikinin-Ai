@@ -43,6 +43,19 @@ export async function resolveInWorkspace(
       true,
     );
 
+  // File rahasia tidak boleh dibaca/ditulis agent lewat tool file apa pun
+  // (lihat isSecretPath). Ini lapis pengganti sandbox di Codespace, yang
+  // tidak bisa jalan (user namespace diblokir container) — tanpa ini, model
+  // bisa membaca .env/kunci yang ada di dalam workspace lewat read_file
+  // atau cat. Pesan hanya menyebut nama file, bukan isinya.
+  const relNorm = relative(root, abs) || ".";
+  if (isSecretPath(relNorm))
+    throw new AgentError(
+      "path_blocked",
+      `file rahasia tidak boleh diakses agent: ${relNorm}`,
+      true,
+    );
+
   // Resolve the deepest existing ancestor so symlinks cannot point outside.
   let probe = abs;
   while (!(await pathExists(probe))) {
@@ -67,7 +80,56 @@ export async function resolveInWorkspace(
       true,
     );
 
+  // Symlink di dalam workspace yang menunjuk ke file rahasia di dalam
+  // workspace juga diblokir (nama yang diminta boleh polos, targetnya yang
+  // rahasia).
+  if (real !== abs && isSecretPath(relative(root, real) || "."))
+    throw new AgentError(
+      "path_blocked",
+      `file rahasia tidak boleh diakses agent: ${rel}`,
+      true,
+    );
+
   return { abs, rel: relative(root, abs) || "." };
+}
+
+/** Template .env tanpa rahasia — boleh dibaca (agent perlu tahu nama var). */
+const SECRET_TEMPLATES = new Set([
+  ".env.example",
+  ".env.sample",
+  ".env.template",
+  ".env.dist",
+]);
+
+/**
+ * True bila path (relatif terhadap workspace) hampir pasti berisi rahasia.
+ * Dipakai resolveInWorkspace (semua tool file + serving HTTP) dan tes.
+ * Nama file dicek, bukan isi — jadi tidak ada rahasia yang bocor lewat sini.
+ */
+export function isSecretPath(rel: string): boolean {
+  const parts = rel.split("/").filter((p) => p !== "" && p !== ".");
+  if (parts.some((p) => p.toLowerCase() === ".ssh")) return true;
+  const base = parts[parts.length - 1]?.toLowerCase() ?? "";
+  if (base === "") return false;
+  if (SECRET_TEMPLATES.has(base)) return false;
+  if (base === ".env" || base.startsWith(".env.")) return true;
+  if (
+    base.endsWith(".pem") ||
+    base.endsWith(".key") ||
+    base.endsWith(".p12") ||
+    base.endsWith(".pfx")
+  )
+    return true;
+  if (
+    base.startsWith("id_rsa") ||
+    base.startsWith("id_ed25519") ||
+    base.startsWith("id_ecdsa") ||
+    base.startsWith("id_dsa")
+  )
+    return true;
+  if (base.startsWith("credentials")) return true;
+  if (base.includes("secret")) return true;
+  return false;
 }
 
 const PROJECT_MARKERS = [".git", "package.json"];
