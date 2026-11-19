@@ -6,8 +6,9 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createReadStream } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { extname } from "node:path";
+import { basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentError } from "../errors.js";
 import { ApprovalBody, StartRunBody, toSSE } from "../events.js";
@@ -78,6 +79,8 @@ const MIME: Record<string, string> = {
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
 };
 
 class HttpError extends Error {
@@ -164,6 +167,54 @@ async function servePreview(
     "X-Content-Type-Options": "nosniff",
   });
   res.end(body);
+}
+
+async function serveDownload(
+  res: ServerResponse,
+  workspace: string,
+  rawPath: string,
+): Promise<void> {
+  let rel: string;
+  try {
+    rel = decodeURIComponent(rawPath);
+  } catch {
+    throw new HttpError(400, "path tidak valid");
+  }
+  let abs: string;
+  try {
+    ({ abs } = await resolveInWorkspace(workspace, rel));
+  } catch (err) {
+    if (err instanceof AgentError && err.code === "path_blocked")
+      throw new HttpError(403, "path ditolak");
+    throw err;
+  }
+  let st;
+  try {
+    st = await stat(abs);
+  } catch {
+    throw new HttpError(404, "file tidak ditemukan");
+  }
+  if (!st.isFile()) throw new HttpError(404, "file tidak ditemukan");
+  // No size cap (unlike preview/zip): a rendered video is routinely
+  // larger than 5 MB. Stream it instead of buffering it in memory.
+  const filename = basename(abs).replace(/["\r\n]/g, "");
+  res.writeHead(200, {
+    "Content-Type":
+      MIME[extname(abs).toLowerCase()] ?? "application/octet-stream",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Content-Length": String(st.size),
+    "Cache-Control": "no-store",
+    ...SECURITY_HEADERS,
+  });
+  await new Promise<void>((resolve) => {
+    const stream = createReadStream(abs);
+    stream.on("error", () => {
+      if (!res.writableEnded) res.destroy();
+      resolve();
+    });
+    stream.on("end", resolve);
+    stream.pipe(res);
+  });
 }
 
 function streamEvents(
@@ -259,7 +310,7 @@ async function route(
   }
 
   const sm = path.match(
-    /^\/api\/sessions\/(s_[a-f0-9]{8})(\/files|\/download\.zip|\/ledger)?$/,
+    /^\/api\/sessions\/(s_[a-f0-9]{8})(\/files|\/download\.zip|\/download|\/ledger)?$/,
   );
   if (method === "GET" && sm) {
     const [, sessionId, action] = sm;
@@ -271,6 +322,13 @@ async function route(
     }
     if (action === "/files") {
       return sendJson(res, 200, await manager.listFiles());
+    }
+    if (action === "/download") {
+      // Single-file download (e.g. a rendered video): unlike the zip,
+      // there is no 5 MB per-file cap — the file streams straight out.
+      const rawPath = url.searchParams.get("path");
+      if (!rawPath) throw new HttpError(400, "path tidak diberikan");
+      return serveDownload(res, workspace, rawPath);
     }
     // download.zip: the whole current workspace (shared by all sessions).
     const entries: Array<{ path: string; data: Buffer }> = [];

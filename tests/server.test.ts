@@ -694,6 +694,82 @@ describe("web server", () => {
     ).toBe(404);
   });
 
+  it("downloads a single file as an attachment, without the zip size cap", async () => {
+    const { url, workspace } = await boot([
+      withCalls(plan("t0")),
+      withCalls(
+        call("t1", "write_file", {
+          path: "index.html",
+          content: "<h1>Kopi</h1>",
+        }),
+      ),
+      finalText("Selesai."),
+    ]);
+    const started = await post(`${url}/api/runs`, { message: "buat halaman" });
+    const { run_id, session_id } = (await started.json()) as {
+      run_id: string;
+      session_id: string;
+    };
+    await (await fetch(`${url}/api/runs/${run_id}/events`)).text();
+    const video = Buffer.from("fake-mp4-bytes-0123456789");
+    await mkdir(join(workspace, "out"));
+    await writeFile(join(workspace, "out", "video.mp4"), video);
+    const big = Buffer.alloc(6 * 1024 * 1024, 7);
+    await writeFile(join(workspace, "big.bin"), big);
+    await writeFile(join(workspace, ".env"), "SECRET=1");
+
+    const dl = await fetch(
+      `${url}/api/sessions/${session_id}/download?path=${encodeURIComponent("out/video.mp4")}`,
+    );
+    expect(dl.status).toBe(200);
+    expect(dl.headers.get("content-type")).toBe("video/mp4");
+    expect(dl.headers.get("content-disposition")).toContain(
+      'attachment; filename="video.mp4"',
+    );
+    expect(new Uint8Array(await dl.arrayBuffer())).toEqual(
+      new Uint8Array(video),
+    );
+
+    // No 5 MB cap here (unlike the zip): a 6 MB file streams out fine.
+    const bigDl = await fetch(
+      `${url}/api/sessions/${session_id}/download?path=big.bin`,
+    );
+    expect(bigDl.status).toBe(200);
+    expect(bigDl.headers.get("content-length")).toBe(String(big.length));
+
+    expect(
+      (await fetch(`${url}/api/sessions/${session_id}/download`)).status,
+    ).toBe(400);
+    expect(
+      (
+        await fetch(
+          `${url}/api/sessions/${session_id}/download?path=tidak-ada.mp4`,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await fetch(
+          `${url}/api/sessions/${session_id}/download?path=${encodeURIComponent("../secret.txt")}`,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await fetch(
+          `${url}/api/sessions/${session_id}/download?path=.env`,
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await fetch(
+          `${url}/api/sessions/s_deadbeef/download?path=index.html`,
+        )
+      ).status,
+    ).toBe(404);
+  });
+
   it("passes the chosen model and effort through to the run", async () => {
     const { url } = await boot([finalText("ok")]);
     const started = await post(`${url}/api/runs`, {

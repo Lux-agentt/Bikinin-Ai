@@ -1248,7 +1248,9 @@ async function renderCode() {
   }
   if (!files.length) files = [{ path: version.path, bytes: version.bytes }];
   const viewable = files
-    .filter((f) => /\.(html?|css|js|mjs|json|md|txt|svg)$/i.test(f.path))
+    .filter((f) =>
+      /\.(html?|css|js|mjs|json|md|txt|svg|mp4|webm|mov)$/i.test(f.path),
+    )
     .slice(0, 12);
   if (!viewable.length)
     viewable.push({ path: version.path, bytes: version.bytes });
@@ -1282,6 +1284,16 @@ async function renderCode() {
     tabs.appendChild(b);
   });
   const active = viewable[state.overlayFileIdx];
+  // Video tidak bisa dibaca sebagai teks: tampilkan info + arahkan ke
+  // tombol Unduh (di bawah), jangan fetch binernya ke penampil kode.
+  if (/\.(mp4|webm|mov)$/i.test(active.path)) {
+    const mb = (active.bytes / 1024 / 1024).toFixed(1);
+    $("#ovLineCount").textContent = `${mb} MB`;
+    $("#codeGutter").replaceChildren();
+    $("#ovPre").textContent =
+      "File video — tekan tombol Unduh untuk mengunduhnya.";
+    return;
+  }
   try {
     const text =
       active.path === version.path && version.content != null
@@ -1360,7 +1372,26 @@ $("#ovCopyBtn").addEventListener("click", async () => {
   }
 });
 $("#ovDlBtn").addEventListener("click", () => {
-  if (state.overlayVersion) void downloadFile(state.overlayVersion);
+  const v = state.overlayVersion;
+  if (!v) return;
+  // File video di tab aktif diunduh lewat route /download (attachment,
+  // tanpa batas 5 MB seperti zip) — bukan lewat downloadFile yang hanya
+  // menangani teks.
+  const active = state.overlayFiles[state.overlayFileIdx];
+  const path = active?.path ?? v.path;
+  if (/\.(mp4|webm|mov)$/i.test(path)) {
+    if (!state.sessionId) return;
+    const a = document.createElement("a");
+    a.href =
+      `/api/sessions/${state.sessionId}/download?path=` +
+      encodeURIComponent(path);
+    a.download = path.split("/").pop() || "video.mp4";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    return;
+  }
+  void downloadFile(v);
 });
 $("#closeOverlay").addEventListener("click", closeOverlay);
 
