@@ -267,6 +267,7 @@ Satu format pesan untuk **CLI** dan **UI**. Agent hanya memanggil `emit(type, da
 
 | Method | Path                             | Fungsi                                                                                                   |
 | ------ | -------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/uploads`                   | Unggah file (multipart/form-data, field `file`, maks 6 file, 10 MB/file, 20 MB total) ke `workspace/uploads/`; balasan `{ uploads: [{ path, name, bytes }] }`; nama rahasia ditolak 403, kelebihan ukuran 413 |
 | POST   | `/api/runs`                      | Mulai run. Body: `StartRunBody`. Balasan: `{ run_id, session_id }`                                       |
 | GET    | `/api/runs/:id/events`           | Aliran SSE; mendukung `Last-Event-ID`                                                                    |
 | POST   | `/api/runs/:id/stop`             | Hentikan run (kejadian akhir: `run_finished` status `stopped`)                                           |

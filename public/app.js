@@ -33,6 +33,7 @@ const state = {
   explainEl: null,
   explainRaw: "",
   files: new Map(), // path -> { bytes }
+  pendingFiles: [], // File[] chosen via + button, uploaded when the run starts
   versions: [], // { path, bytes, title, content: string|null, runId }
   activeVersion: -1,
   resultCard: null,
@@ -816,6 +817,82 @@ $("#enhanceBtn").addEventListener("click", () => {
   input.focus();
   toast("Prompt diperjelas otomatis");
 });
+
+// ---------- Lampiran file (POST /api/uploads, maks 6 file, 10 MB/file) ----------
+
+const MAX_ATTACH_FILES = 6;
+const MAX_ATTACH_BYTES = 10 * 1024 * 1024;
+
+function fmtAttachBytes(n) {
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
+function renderAttachments() {
+  const row = $("#attachRow");
+  row.replaceChildren();
+  row.hidden = state.pendingFiles.length === 0;
+  state.pendingFiles.forEach((file, i) => {
+    const chip = document.createElement("span");
+    chip.className = "attach-chip";
+    const label = document.createElement("span");
+    label.textContent = `${file.name} · ${fmtAttachBytes(file.size)}`;
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "attach-x";
+    x.textContent = "×";
+    x.setAttribute("aria-label", `Hapus ${file.name}`);
+    x.addEventListener("click", () => {
+      state.pendingFiles.splice(i, 1);
+      renderAttachments();
+    });
+    chip.append(label, x);
+    row.appendChild(chip);
+  });
+}
+
+$("#plusBtn").addEventListener("click", () => $("#fileInput").click());
+
+$("#fileInput").addEventListener("change", () => {
+  const picked = [...$("#fileInput").files];
+  $("#fileInput").value = "";
+  for (const file of picked) {
+    if (state.pendingFiles.length >= MAX_ATTACH_FILES) {
+      toast(`Maksimal ${MAX_ATTACH_FILES} file per pesan.`);
+      break;
+    }
+    if (file.size > MAX_ATTACH_BYTES) {
+      toast(`${file.name} melebihi batas 10 MB.`);
+      continue;
+    }
+    if (file.size === 0) {
+      toast(`${file.name} kosong.`);
+      continue;
+    }
+    state.pendingFiles.push(file);
+  }
+  renderAttachments();
+});
+
+/** Uploads pending files first; returns their workspace paths. */
+async function uploadPendingFiles() {
+  const form = new FormData();
+  for (const file of state.pendingFiles) form.append("file", file);
+  const r = await fetch("/api/uploads", { method: "POST", body: form });
+  if (!r.ok) {
+    let detail = "";
+    try {
+      const b = await r.json();
+      if (b && typeof b.error === "string") detail = b.error;
+    } catch {
+      // fall back to the status below
+    }
+    throw new Error(detail || `Upload gagal (${r.status}).`);
+  }
+  const data = await r.json();
+  return (data.uploads ?? []).map((u) => u.path);
+}
 
 // ---------- Messages ----------
 
@@ -1620,6 +1697,22 @@ function listen(runId) {
 
 async function start(message) {
   if (!message || state.busy) return;
+  setBusy(true);
+  // Upload first: if it fails, no run starts and the files stay selected.
+  let attachmentIds = [];
+  let attachedNames = [];
+  if (state.pendingFiles.length > 0) {
+    attachedNames = state.pendingFiles.map((f) => f.name);
+    try {
+      attachmentIds = await uploadPendingFiles();
+    } catch (err) {
+      setBusy(false);
+      toast(err instanceof Error ? err.message : "Upload gagal.");
+      return;
+    }
+    state.pendingFiles = [];
+    renderAttachments();
+  }
   state.lastPrompt = message;
   state.errorCard = null;
   state.files.clear();
@@ -1631,8 +1724,11 @@ async function start(message) {
     state.planEl = null;
   }
   if (heroEl.isConnected) heroEl.remove();
-  addUser(message);
-  setBusy(true);
+  addUser(
+    attachedNames.length > 0
+      ? `${message}\n📎 ${attachedNames.join(", ")}`
+      : message,
+  );
   setMeters(0, 0);
   addThink("Menyusun rencana…");
   try {
@@ -1640,6 +1736,7 @@ async function start(message) {
     if (state.sessionId) body.session_id = state.sessionId;
     if (state.curModel) body.model = state.curModel;
     body.effort = state.curEffort;
+    if (attachmentIds.length > 0) body.attachment_ids = attachmentIds;
     const r = await fetch("/api/runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

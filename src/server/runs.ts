@@ -1,8 +1,9 @@
 // Keeps runs in memory for the web UI: event buffer, live listeners, pending approvals, stop.
 // One active run at a time, because all runs share one workspace.
 import { randomUUID } from "node:crypto";
+import { statSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   runAgent,
   type AgentDeps,
@@ -23,6 +24,7 @@ import type { LlmClient } from "../llm/client.js";
 import { createOpenAiLlm } from "../llm/client.js";
 import { createFallbackLlm } from "../llm/fallback.js";
 import { isRouterEnabled, routeProviders } from "../llm/router.js";
+import { isSecretPath } from "../safety/paths.js";
 import type { ProviderConfig } from "../llm/providers.js";
 import {
   appendLessons,
@@ -127,6 +129,9 @@ export interface RunManagerOptions {
 export class BusyError extends Error {}
 
 export class NotConfiguredError extends Error {}
+
+/** An attachment_id that is missing, outside the workspace, or secret. */
+export class BadAttachmentError extends Error {}
 
 export class RunManager {
   private readonly runs = new Map<string, RunRecord>();
@@ -327,14 +332,60 @@ export class RunManager {
       },
     );
     const effort = body.effort ?? "sedang";
+    // Attachments (POST /api/uploads): validate each id, then tell the
+    // agent where the files are. The session title keeps the user's own
+    // message; only the prompt the loop sees carries the file list.
+    const attached = this.resolveAttachments(body.attachment_ids ?? []);
+    const message =
+      attached.length > 0
+        ? `${body.message}\n\nFile terlampir (baca dengan read_file):\n${attached
+            .map((a) => `- ${a.path} (${a.bytes} byte)`)
+            .join("\n")}`
+        : body.message;
     return this.beginRun(
       sessionId,
-      body.message,
+      message,
       ordered[0],
       effort,
       route,
       ordered,
+      body.message,
     );
+  }
+
+  /**
+   * Attachment ids are workspace-relative paths from POST /api/uploads.
+   * Rejects anything missing, outside the workspace, or on a secret path —
+   * the loop's read_file re-checks the same rules when it opens the file.
+   */
+  private resolveAttachments(
+    ids: string[],
+  ): Array<{ path: string; bytes: number }> {
+    const out: Array<{ path: string; bytes: number }> = [];
+    for (const id of ids) {
+      if (isSecretPath(id))
+        throw new BadAttachmentError(
+          `lampiran ditolak (jalur rahasia): ${id}`,
+        );
+      const abs = resolve(this.opts.workspace, id);
+      const rel = relative(this.opts.workspace, abs);
+      if (rel.startsWith(`..${sep}`) || rel === ".." || isAbsolute(rel))
+        throw new BadAttachmentError(
+          `lampiran di luar workspace: ${id}`,
+        );
+      let size: number;
+      try {
+        const st = statSync(abs);
+        if (!st.isFile())
+          throw new BadAttachmentError(`lampiran bukan file: ${id}`);
+        size = st.size;
+      } catch (err) {
+        if (err instanceof BadAttachmentError) throw err;
+        throw new BadAttachmentError(`lampiran tidak ditemukan: ${id}`);
+      }
+      out.push({ path: rel.split(sep).join("/"), bytes: size });
+    }
+    return out;
   }
 
   /**
@@ -378,6 +429,7 @@ export class RunManager {
     effort: "sedang" | "tinggi",
     route?: RouteInfo,
     providers: ProviderConfig[] = [provider],
+    title: string = message,
   ): { run_id: string; session_id: string } {
     const runId = `run_${randomUUID().slice(0, 8)}`;
     if (!this.sessions.has(sessionId)) {
@@ -398,7 +450,7 @@ export class RunManager {
       m.runCount += 1;
     } else {
       this.meta.set(sessionId, {
-        title: message,
+        title,
         prompts: 1,
         updatedAt: Date.now(),
         runIds: [runId],

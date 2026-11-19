@@ -14,9 +14,10 @@ import { AgentError } from "../errors.js";
 import { ApprovalBody, StartRunBody, toSSE } from "../events.js";
 import { resolveInWorkspace } from "../safety/paths.js";
 import { listSkills, REPO_SKILLS_DIR } from "../skills/loader.js";
-import { BusyError, NotConfiguredError, type RunManager } from "./runs.js";
+import { BusyError, NotConfiguredError, BadAttachmentError, type RunManager } from "./runs.js";
 import { buildZip } from "./zip.js";
 import { listCheckpoints } from "./checkpoints.js";
+import { saveUploads, UploadError } from "./uploads.js";
 
 const PUBLIC_DIR = fileURLToPath(new URL("../../public/", import.meta.url));
 const MAX_BODY = 64 * 1024;
@@ -352,6 +353,18 @@ async function route(
     return;
   }
 
+  if (method === "POST" && path === "/api/uploads") {
+    try {
+      return sendJson(res, 201, {
+        uploads: await saveUploads(req, workspace),
+      });
+    } catch (err) {
+      if (err instanceof UploadError)
+        throw new HttpError(err.status, err.message);
+      throw err;
+    }
+  }
+
   if (method === "POST" && path === "/api/runs") {
     const parsed = StartRunBody.safeParse(await readJson(req));
     if (!parsed.success) throw new HttpError(400, "isi permintaan tidak valid");
@@ -361,6 +374,8 @@ async function route(
       if (err instanceof BusyError) throw new HttpError(409, err.message);
       if (err instanceof NotConfiguredError)
         throw new HttpError(503, err.message);
+      if (err instanceof BadAttachmentError)
+        throw new HttpError(400, err.message);
       throw err;
     }
   }

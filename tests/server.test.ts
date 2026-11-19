@@ -837,4 +837,80 @@ describe("web server", () => {
     expect((await fetch(`${url}/preview/%2Fetc%2Fpasswd`)).status).toBe(403);
     expect((await fetch(`${url}/preview/tidak-ada.html`)).status).toBe(404);
   });
+
+  it("accepts file uploads and lists them to the run", async () => {
+    const { url, workspace } = await boot([finalText("ok")]);
+    const form = new FormData();
+    form.append(
+      "file",
+      new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47])], {
+        type: "image/png",
+      }),
+      "foto.png",
+    );
+    const up = await fetch(`${url}/api/uploads`, {
+      method: "POST",
+      body: form,
+    });
+    expect(up.status).toBe(201);
+    const body = (await up.json()) as {
+      uploads: Array<{ path: string; name: string; bytes: number }>;
+    };
+    expect(body.uploads).toHaveLength(1);
+    const uploaded = body.uploads[0];
+    expect(uploaded.path).toMatch(/^uploads\/[a-f0-9]{8}_foto\.png$/);
+    expect(uploaded.name).toBe("foto.png");
+    expect(uploaded.bytes).toBe(4);
+    expect(
+      await readFile(join(workspace, uploaded.path)),
+    ).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    // The run sees the file list, but the session title stays the message.
+    const started = await post(`${url}/api/runs`, {
+      message: "perbaiki foto ini",
+      attachment_ids: [uploaded.path],
+    });
+    expect(started.status).toBe(201);
+    const { run_id, session_id } = (await started.json()) as {
+      run_id: string;
+      session_id: string;
+    };
+    const events = parseSse(
+      await (await fetch(`${url}/api/runs/${run_id}/events`)).text(),
+    );
+    const first = events[0];
+    expect(first.type).toBe("run_started");
+    if (first.type !== "run_started") throw new Error("bukan run_started");
+    expect(first.user_message).toContain("File terlampir");
+    expect(first.user_message).toContain(uploaded.path);
+    const sessions = (await (
+      await fetch(`${url}/api/sessions`)
+    ).json()) as Array<{ session_id: string; title: string }>;
+    expect(sessions[0].title).toBe("perbaiki foto ini");
+
+    // Unknown attachment ids are rejected, not silently dropped.
+    const bad = await post(`${url}/api/runs`, {
+      message: "hai",
+      attachment_ids: ["uploads/tidak-ada.jpg"],
+    });
+    expect(bad.status).toBe(400);
+
+    // Secret names and oversize files are rejected at upload.
+    const secretForm = new FormData();
+    secretForm.append("file", new Blob(["x"]), "my-secret.txt");
+    expect(
+      (await fetch(`${url}/api/uploads`, { method: "POST", body: secretForm }))
+        .status,
+    ).toBe(403);
+    const bigForm = new FormData();
+    bigForm.append(
+      "file",
+      new Blob([Buffer.alloc(10 * 1024 * 1024 + 1, 7)]),
+      "big.bin",
+    );
+    expect(
+      (await fetch(`${url}/api/uploads`, { method: "POST", body: bigForm }))
+        .status,
+    ).toBe(413);
+  });
 });
