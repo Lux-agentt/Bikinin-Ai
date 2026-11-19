@@ -177,6 +177,7 @@ async function withSseServer(
 type CapturedBody = {
   messages: Array<{
     role?: string;
+    content?: string | null;
     extra_content?: { google?: { thought_signature?: string } };
     tool_calls?: Array<{
       extra_content?: { google?: { thought_signature?: string } };
@@ -294,6 +295,78 @@ describe("Gemini thought signature round-trip", () => {
         expect(asst.extra_content?.google?.thought_signature).toBe("sig-msg");
         const tc = asst.tool_calls?.[0] ?? {};
         expect(tc.extra_content?.google?.thought_signature).toBe("sig-abc");
+      },
+    );
+  });
+
+  it("sends null content to Gemini for a textless tool-call turn", async () => {
+    // Live eval 2026-11-19 (log 2026-11-19-051358693.json): edge-missing-file
+    // 400'd on a history of two textless tool-call turns. The empty-string
+    // content paired with tool_calls is the remaining suspect, so Gemini
+    // gets null instead — while the signature still rides along.
+    await withSseServer(
+      [
+        [toolCallChunk("sig-abc"), finishChunk("tool_calls")],
+        [textChunk("Selesai."), finishChunk("stop")],
+      ],
+      "/generativelanguage.googleapis.com/v1",
+      async (bodies, baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const first = await llm.chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "baca a.txt" }],
+          tools: [readFileTool],
+        });
+        expect(first.text).toBe("");
+        const messages: ChatMessage[] = [
+          { role: "user", content: "baca a.txt" },
+          echoAssistantMessage(first),
+          { role: "tool", tool_call_id: "call_1", content: "hello\n" },
+        ];
+        await llm.chat({ model: "test-model", messages, tools: [] });
+        expect(bodies).toHaveLength(2);
+        const second = bodies[1] as CapturedBody;
+        const asst = second.messages[1] ?? {};
+        expect(asst.content).toBeNull();
+        expect(
+          asst.tool_calls?.[0]?.extra_content?.google?.thought_signature,
+        ).toBe("sig-abc");
+      },
+    );
+  });
+
+  it("keeps empty-string content for non-Gemini providers", async () => {
+    // Some non-Gemini endpoints reject null content — they keep "".
+    await withSseServer(
+      [
+        [toolCallChunk("sig-abc"), finishChunk("tool_calls")],
+        [textChunk("Selesai."), finishChunk("stop")],
+      ],
+      "/v1",
+      async (bodies, baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const first = await llm.chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "baca a.txt" }],
+          tools: [readFileTool],
+        });
+        const messages: ChatMessage[] = [
+          { role: "user", content: "baca a.txt" },
+          echoAssistantMessage(first),
+          { role: "tool", tool_call_id: "call_1", content: "hello\n" },
+        ];
+        await llm.chat({ model: "test-model", messages, tools: [] });
+        expect(bodies).toHaveLength(2);
+        const second = bodies[1] as CapturedBody;
+        expect(second.messages[1]?.content).toBe("");
       },
     );
   });

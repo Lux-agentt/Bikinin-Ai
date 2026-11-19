@@ -316,6 +316,31 @@ function shapeSummary(messages: ChatMessage[]): string {
 }
 
 /**
+ * Gemini's OpenAI-compat layer rejects an assistant message that pairs
+ * tool_calls with an empty-string content. Live eval 2026-11-19
+ * (log 2026-11-19-051358693.json): edge-missing-file 400'd on a history
+ * of two TEXTLESS tool-call turns — both with tool signatures present,
+ * no message signature anywhere — while the same shape passed on Nano
+ * and research tasks (whose turns carry text) passed on Gemini. The
+ * empty string is the remaining difference, so for Gemini-bound
+ * requests it is sent as null instead (the OpenAI type allows null for
+ * tool-only turns). Non-Gemini providers keep "" because some of them
+ * reject null (see echoAssistantMessage).
+ */
+function normalizeForGemini(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map((m) => {
+    if (
+      m.role !== "assistant" ||
+      !("tool_calls" in m) ||
+      !m.tool_calls ||
+      m.content !== ""
+    )
+      return m;
+    return { ...m, content: null } as ChatMessage;
+  });
+}
+
+/**
  * Drop provider-opaque fields from echoed assistant messages when talking
  * to a non-Gemini provider — strict providers reject requests carrying
  * extra_content. Gemini requests pass through untouched.
@@ -374,7 +399,7 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
             {
               model: p.model,
               messages: isGeminiBaseUrl(opts.baseURL)
-                ? p.messages
+                ? normalizeForGemini(p.messages)
                 : stripForeignExtraContent(p.messages),
               ...(p.tools.length > 0 ? { tools: p.tools } : {}),
               stream: true,
