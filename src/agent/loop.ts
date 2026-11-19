@@ -870,8 +870,17 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
       // because some OpenAI-compatible endpoints reject null content.
       messages.push(echoAssistantMessage(res));
       const { outputs, stopReason } = await runToolCalls(res.toolCalls);
+      const callNames = new Map(
+        res.toolCalls.map((call) => [call.id, call.function.name]),
+      );
       for (const o of outputs) {
-        messages.push({ role: "tool", tool_call_id: o.id, content: o.content });
+        const name = callNames.get(o.id);
+        messages.push({
+          role: "tool",
+          tool_call_id: o.id,
+          ...(name ? { name } : {}),
+          content: o.content,
+        });
       }
       // Fase 5: compaction ekstraktif di dalam run (tanpa model baru).
       compactContext(messages);

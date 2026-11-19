@@ -90,7 +90,11 @@ const readFileTool: ChatCompletionTool = {
   },
 };
 
-const toolCallChunk = (sig: string, msgSig = "sig-msg") =>
+const toolCallChunk = (
+  sig: string,
+  msgSig = "sig-msg",
+  toolCallId: string | undefined = "call_1",
+) =>
   JSON.stringify({
     id: "chatcmpl-test",
     object: "chat.completion.chunk",
@@ -105,7 +109,7 @@ const toolCallChunk = (sig: string, msgSig = "sig-msg") =>
           tool_calls: [
             {
               index: 0,
-              id: "call_1",
+              ...(toolCallId ? { id: toolCallId } : {}),
               type: "function",
               function: { name: "read_file", arguments: '{"path":"a.txt"}' },
               extra_content: { google: { thought_signature: sig } },
@@ -186,6 +190,37 @@ type CapturedBody = {
 };
 
 describe("Gemini thought signature round-trip", () => {
+  it("generates unique IDs when a provider omits streamed tool-call IDs", async () => {
+    await withSseServer(
+      [
+        [toolCallChunk("sig-1", undefined, ""), finishChunk("tool_calls")],
+        [toolCallChunk("sig-2", undefined, ""), finishChunk("tool_calls")],
+      ],
+      "/generativelanguage.googleapis.com/v1",
+      async (_bodies, baseURL) => {
+        const makeLlm = () =>
+          createOpenAiLlm({
+            baseURL,
+            apiKey: "test-key",
+            quota: { enabled: false },
+          });
+        const first = await makeLlm().chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "langkah pertama" }],
+          tools: [readFileTool],
+        });
+        const second = await makeLlm().chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "langkah kedua" }],
+          tools: [readFileTool],
+        });
+        expect(first.toolCalls[0]?.id).toBeTruthy();
+        expect(second.toolCalls[0]?.id).toBeTruthy();
+        expect(second.toolCalls[0]?.id).not.toBe(first.toolCalls[0]?.id);
+      },
+    );
+  });
+
   it("captures the signature from a streamed tool call", async () => {
     await withSseServer(
       [[toolCallChunk("sig-abc"), finishChunk("tool_calls")]],

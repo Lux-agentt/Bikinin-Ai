@@ -312,6 +312,14 @@ describe("agent loop event contract", () => {
         ),
     );
     expect(asst).toBeDefined();
+    const toolResult = third.find(
+      (m) => m.role === "tool" && m.tool_call_id === "t1",
+    );
+    expect(toolResult).toMatchObject({
+      role: "tool",
+      tool_call_id: "t1",
+      name: "read_file",
+    });
     const tc = (
       asst as {
         tool_calls?: Array<Record<string, unknown>>;

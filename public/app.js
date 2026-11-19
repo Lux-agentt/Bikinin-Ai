@@ -43,6 +43,7 @@ const state = {
   startedAt: 0,
   timerInt: 0,
   toastTimer: 0,
+  errorCard: null,
 };
 
 const fmtUsd = (n) => "$" + n.toFixed(4);
@@ -995,16 +996,49 @@ function explainBox() {
   return state.explainEl;
 }
 
-function addErrorCard(title, message) {
+function addErrorCard(title, message, options = {}) {
   const card = tpl("#tplError");
   card.querySelector("b").textContent = title;
   card.querySelector("small").textContent = message;
-  card.querySelector(".retry-btn").addEventListener("click", () => {
+  const retry = card.querySelector(".retry-btn");
+  retry.hidden = options.retry === false;
+  retry.addEventListener("click", () => {
     card.remove();
+    if (state.errorCard === card) state.errorCard = null;
     if (!state.busy && state.lastPrompt) void start(state.lastPrompt);
   });
+  const switchModel = card.querySelector(".switch-model-btn");
+  switchModel.hidden = !options.switchModel || state.models.length < 2;
+  switchModel.addEventListener("click", () => {
+    card.remove();
+    if (state.errorCard === card) state.errorCard = null;
+    if ($("#modelPop").hidden) $("#modelBtn").click();
+  });
   main.appendChild(card);
+  state.errorCard = card;
   scrollDown(true);
+}
+
+function showRunError(message) {
+  const text = String(message ?? "");
+  const lower = text.toLowerCase();
+  if (/\b429\b|rate.?limit|quota/.test(lower)) {
+    addErrorCard(
+      "Kuota atau rate limit provider tercapai",
+      `${text} Pilih model lain, atau coba lagi setelah kuota tersedia.`,
+      { retry: true, switchModel: true },
+    );
+    return;
+  }
+  if (/\b400\b|invalid_argument|menolak request/.test(lower)) {
+    addErrorCard(
+      "Provider menolak format permintaan (400)",
+      `${text} Mengulang model yang sama biasanya tidak membantu; coba pilih model lain.`,
+      { retry: false, switchModel: true },
+    );
+    return;
+  }
+  addErrorCard("Agent mengalami masalah", text, { retry: true });
 }
 
 // ---------- Fase 6: verification card + diff review ----------
@@ -1452,13 +1486,14 @@ function handle(e) {
     }
 
     case "error":
-      if (!e.retryable) addErrorCard("Agent mengalami masalah", e.message);
+      if (!e.retryable) showRunError(e.message);
       break;
 
     case "run_finished": {
       closeApproval();
       setMeters(e.totals.steps, e.totals.cost_usd);
       finishThink(e.status, e.totals.steps);
+      if (e.status === "error" && !state.errorCard) showRunError(e.summary);
       if (!state.explainEl && e.summary && e.status !== "error") {
         renderMarkdown(explainBox(), e.summary);
       }
@@ -1545,6 +1580,7 @@ function listen(runId) {
 async function start(message) {
   if (!message || state.busy) return;
   state.lastPrompt = message;
+  state.errorCard = null;
   state.files.clear();
   state.explainEl = null;
   state.explainRaw = "";

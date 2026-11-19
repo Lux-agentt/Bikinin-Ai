@@ -1167,6 +1167,29 @@ main::-webkit-scrollbar {
   color: #fda4af;
   margin-top: 3px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.error-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 7px;
+}
+.switch-model-btn {
+  flex: none;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.switch-model-btn:hover {
+  background: rgba(93, 139, 255, 0.16);
 }
 .retry-btn {
   flex: none;
@@ -1189,6 +1212,15 @@ main::-webkit-scrollbar {
 }
 .retry-btn:active {
   transform: scale(0.95);
+}
+@media (max-width: 480px) {
+  .error-card {
+    align-items: flex-start;
+  }
+  .error-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 /* ===== POST-COMPLETION STREAMING EXPLANATION ===== */
@@ -2492,135 +2524,6 @@ main::-webkit-scrollbar {
 }
 .hero h1 {
   text-wrap: balance;
-}
-
-/* ===== Run ledger panel (Fase 7, Track B) ===== */
-.ledger-panel {
-  margin: 0 14px 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--panel);
-}
-/* Di dalam chat (stage sudah punya padding + gap sendiri): tanpa margin luar. */
-main .ledger-panel {
-  margin: 0;
-}
-.ledger-head {
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.ledger-head:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 2px;
-  border-radius: 8px;
-}
-.ledger-summary {
-  flex: 1;
-  min-width: 0;
-  text-align: center;
-  font-size: 11.5px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ledger-summary[hidden] {
-  display: none;
-}
-.ledger-chev {
-  color: var(--faint);
-  flex: none;
-  transition: transform 0.2s;
-}
-.ledger-panel.collapsed .ledger-chev {
-  transform: rotate(-90deg);
-}
-.ledger-panel.collapsed .ledger-head {
-  margin-bottom: 0;
-}
-.ledger-panel.collapsed .ledger-grid,
-.ledger-panel.collapsed .ledger-tools,
-.ledger-panel.collapsed .ledger-foot {
-  display: none;
-}
-.ledger-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-}
-.ledger-head b {
-  font-size: 13px;
-}
-.ledger-status {
-  font-size: 11px;
-  font-weight: 650;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: #131a2e;
-  color: var(--muted);
-}
-.ledger-status[data-status="running"] {
-  background: #12324a;
-  color: #7dd3fc;
-}
-.ledger-status[data-status="completed"] {
-  background: #0f2e1f;
-  color: #4ade80;
-}
-.ledger-status[data-status="error"],
-.ledger-status[data-status="budget_exceeded"] {
-  background: #3a1414;
-  color: #f87171;
-}
-.ledger-status[data-status="stopped"] {
-  background: #2a2a12;
-  color: #facc15;
-}
-.ledger-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px 12px;
-}
-.ledger-grid span {
-  display: block;
-  font-size: 10.5px;
-  color: var(--faint);
-  margin-bottom: 2px;
-}
-.ledger-grid b {
-  font-size: 12.5px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-.ledger-tools {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 10px;
-}
-.ledger-tools span {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--muted);
-}
-.ledger-tools .ledger-fail {
-  color: #f87171;
-  font-style: normal;
-}
-.ledger-foot {
-  margin-top: 10px;
-  font-size: 10.5px;
-  color: var(--faint);
-}
-@media (max-width: 420px) {
-  .ledger-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 /* ===== Verification card + diff review (Fase 6) ===== */
