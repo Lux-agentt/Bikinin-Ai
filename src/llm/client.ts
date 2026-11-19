@@ -186,6 +186,24 @@ function classify(
         ),
       };
     }
+    if (status === 400 && /thought_signature/i.test(err.message)) {
+      // Live run 2026-11-19: Gemini 400'd a replayed update_plan call
+      // because the model never attached a thought_signature to it
+      // (fingerprint sig:0 — nothing was captured to echo). Retrying
+      // Gemini with the same history 400s again, but the next provider
+      // does not validate signatures, so fall over instead of killing
+      // the run.
+      return {
+        retryable: false,
+        error: new AgentError(
+          "provider_error",
+          withDetail("Penyedia menolak request (400)") +
+            (shape ? ` | riwayat: ${shape}` : ""),
+          false,
+          true,
+        ),
+      };
+    }
     return {
       retryable: false,
       error: new AgentError(

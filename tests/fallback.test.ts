@@ -50,6 +50,26 @@ describe("createFallbackLlm", () => {
     expect(calls).toEqual(["a", "b"]);
   });
 
+  it("falls over on a 400 about a missing thought_signature", async () => {
+    const calls: string[] = [];
+    const llm = createFallbackLlm([provider("a", 1), provider("b", 2)], {
+      makeClient: fake((model) => {
+        if (model === "a-model")
+          throw new AgentError(
+            "provider_error",
+            "Penyedia menolak request (400): Function call is missing a thought_signature in functionCall parts",
+            false,
+            true,
+          );
+        return ok("dari b");
+      }, calls),
+    });
+    const r = await llm.chat({ model: "ignored", messages: [], tools: [] });
+    expect(r.text).toBe("dari b");
+    expect(r.provider).toBe("b");
+    expect(calls).toEqual(["a", "b"]);
+  });
+
   it("does not fall over on a non-eligible error", async () => {
     const calls: string[] = [];
     const llm = createFallbackLlm([provider("a", 1), provider("b", 2)], {

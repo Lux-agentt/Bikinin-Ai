@@ -4,6 +4,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
+import { AgentError } from "../src/errors.js";
 import {
   createOpenAiLlm,
   echoAssistantMessage,
@@ -76,6 +77,72 @@ describe("provider error detail", () => {
             tools: [],
           }),
         ).rejects.toThrow(/Bad gateway from upstream model/);
+      },
+    );
+  });
+
+  it("400 about a missing thought_signature falls over instead of killing the run", async () => {
+    await withErrorServer(
+      400,
+      {
+        error: {
+          code: 400,
+          message:
+            "Function call is missing a thought_signature in functionCall parts. This is required for tools to work correctly, and missing thought_signature may lead to degraded model performance. Additional data, function call `default_api:update_plan`, position 2.",
+          status: "INVALID_ARGUMENT",
+        },
+      },
+      async (baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        let caught: unknown;
+        try {
+          await llm.chat({
+            model: "test-model",
+            messages: [{ role: "user", content: "hi" }],
+            tools: [],
+          });
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(AgentError);
+        expect((caught as AgentError).fallback).toBe(true);
+        expect((caught as AgentError).retryable).toBe(false);
+      },
+    );
+  });
+
+  it("a plain 400 without thought_signature still does not fall over", async () => {
+    await withErrorServer(
+      400,
+      {
+        error: {
+          message:
+            "Invalid function call format: tool role message must follow an assistant message with tool_calls",
+          type: "invalid_request_error",
+        },
+      },
+      async (baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        let caught: unknown;
+        try {
+          await llm.chat({
+            model: "test-model",
+            messages: [{ role: "user", content: "hi" }],
+            tools: [],
+          });
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(AgentError);
+        expect((caught as AgentError).fallback).toBe(false);
       },
     );
   });
