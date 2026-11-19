@@ -8,6 +8,7 @@ import { AgentError } from "../src/errors.js";
 import {
   createOpenAiLlm,
   echoAssistantMessage,
+  echoToolCalls,
   type ChatMessage,
 } from "../src/llm/client.js";
 import type { ChatCompletionTool } from "openai/resources/chat/completions";
@@ -89,6 +90,44 @@ describe("provider error detail", () => {
           code: 400,
           message:
             "Function call is missing a thought_signature in functionCall parts. This is required for tools to work correctly, and missing thought_signature may lead to degraded model performance. Additional data, function call `default_api:update_plan`, position 2.",
+          status: "INVALID_ARGUMENT",
+        },
+      },
+      async (baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        let caught: unknown;
+        try {
+          await llm.chat({
+            model: "test-model",
+            messages: [{ role: "user", content: "hi" }],
+            tools: [],
+          });
+        } catch (err) {
+          caught = err;
+        }
+        expect(caught).toBeInstanceOf(AgentError);
+        expect((caught as AgentError).fallback).toBe(true);
+        expect((caught as AgentError).retryable).toBe(false);
+      },
+    );
+  });
+
+  it("400 about malformed tool call data falls over instead of killing the run", async () => {
+    // Live run 2026-11-19 22:00 WIB: after a ~20-turn run the provider
+    // 400'd with "Upstream emitted malformed tool call data that could
+    // not be repaired" — the model itself emitted a broken tool call.
+    // Same recovery as the missing-signature 400: fall over, don't die.
+    await withErrorServer(
+      400,
+      {
+        error: {
+          code: 400,
+          message:
+            "Upstream emitted malformed tool call data that could not be repaired.",
           status: "INVALID_ARGUMENT",
         },
       },
@@ -603,5 +642,32 @@ describe("Gemini thought signature round-trip", () => {
         );
       },
     );
+  });
+
+  it("coerces malformed tool-call arguments to {} when echoing", () => {
+    // A tool call captured with broken arguments JSON must never be
+    // sent back verbatim — a strict provider 400s the whole history
+    // for it. Valid arguments pass through untouched.
+    const echoed = echoToolCalls([
+      {
+        id: "c1",
+        type: "function",
+        function: { name: "read_file", arguments: "{bukan json" },
+      },
+      {
+        id: "c2",
+        type: "function",
+        function: { name: "read_file", arguments: "" },
+      },
+      {
+        id: "c3",
+        type: "function",
+        function: { name: "read_file", arguments: '{"path":"a.txt"}' },
+      },
+    ]);
+    const args = echoed.map(
+      (c) => (c as { function: { arguments: string } }).function.arguments,
+    );
+    expect(args).toEqual(["{}", "{}", '{"path":"a.txt"}']);
   });
 });

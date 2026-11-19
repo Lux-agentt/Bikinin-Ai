@@ -186,12 +186,21 @@ function classify(
         ),
       };
     }
-    if (status === 400 && /thought_signature/i.test(err.message)) {
-      // Live run 2026-11-19: Gemini 400'd a replayed update_plan call
-      // because the model never attached a thought_signature to it
-      // (fingerprint sig:0 — nothing was captured to echo). Retrying
-      // Gemini with the same history 400s again, but the next provider
-      // does not validate signatures, so fall over instead of killing
+    if (
+      status === 400 &&
+      /thought_signature|malformed tool call|could not be repaired/i.test(
+        err.message,
+      )
+    ) {
+      // Two live 400 modes, same recovery. (1) 2026-11-19: Gemini 400'd a
+      // replayed update_plan call because the model never attached a
+      // thought_signature to it (fingerprint sig:0 — nothing was captured
+      // to echo). (2) 2026-11-19 22:00 WIB: "Upstream emitted malformed
+      // tool call data that could not be repaired" — after a ~20-turn run
+      // the model itself emitted a broken tool call and the provider
+      // refused it. In both cases retrying the same provider with the
+      // same history 400s again, but the next provider does not validate
+      // signatures and samples fresh, so fall over instead of killing
       // the run.
       return {
         retryable: false,
@@ -266,12 +275,26 @@ function readThoughtSignature(tc: unknown): string | undefined {
  * location Google's own OpenAI-compatibility layer uses. Other
  * providers never see it: createOpenAiLlm strips extra_content from
  * outgoing messages unless the base URL is Gemini's.
+ *
+ * Arguments are validated before echoing: a tool call captured with
+ * malformed arguments JSON (a truncated stream, a model slip) must
+ * never be sent back as-is — a strict provider 400s the whole history
+ * for it. Coerce it to "{}" instead: the call/result pairing stays
+ * intact, and the loop already ran that call with parsed "{}"
+ * (parseArgs), so the echo matches what actually executed.
  */
 export function echoToolCalls(
   calls: ToolCallReq[],
 ): ChatCompletionMessageToolCall[] {
   return calls.map((c) => {
-    const base = { id: c.id, type: "function" as const, function: c.function };
+    let args = c.function.arguments;
+    try {
+      JSON.parse(args);
+    } catch {
+      args = "{}";
+    }
+    const fn = { ...c.function, arguments: args };
+    const base = { id: c.id, type: "function" as const, function: fn };
     if (!c.thoughtSignature) return base;
     return {
       ...base,
