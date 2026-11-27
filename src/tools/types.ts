@@ -63,6 +63,12 @@ export interface ToolContext {
    * build its own LLM client. Absent when the run has no vision wired in.
    */
   describeImage?: (req: VisionRequest) => Promise<VisionResult>;
+  /**
+   * The run's stop signal (POST /api/runs/:id/stop aborts it). Long-running
+   * tools (run_command, render_video) must pass it to their child process
+   * so Stop kills the work in progress, not just the next step.
+   */
+  signal?: AbortSignal;
 }
 
 export interface ToolSpec<S extends z.ZodTypeAny> {

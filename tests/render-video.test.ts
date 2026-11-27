@@ -205,6 +205,31 @@ describe("render_video tool (stubbed exec)", () => {
     expect(calls[1].args).toContain("--frame=150");
   });
 
+  it("meneruskan sinyal stop ke proses render", async () => {
+    const ws = await tempWorkspace();
+    await makeProject(ws);
+    const { exec: stubExec } = makeStub();
+    const seen: Array<{ signal?: AbortSignal }> = [];
+    const exec = async (
+      file: string,
+      args: string[],
+      o: { cwd: string; timeout: number; signal?: AbortSignal },
+    ) => {
+      seen.push(o);
+      return stubExec(file, args, o);
+    };
+    const ctrl = new AbortController();
+    ctrl.abort();
+    const r = await executeRenderVideo(
+      { projectDir: "video", compositionId: "Intro", output: "out/video.mp4" },
+      { workspace: ws, signal: ctrl.signal },
+      exec,
+    );
+    expect(r.ok).toBe(true);
+    // compositions + still + render lewat closure run (ffprobe tidak).
+    expect(seen.filter((o) => o.signal === ctrl.signal).length).toBe(3);
+  });
+
   it("a failed still aborts before the full render", async () => {
     const ws = await tempWorkspace();
     await makeProject(ws);

@@ -396,3 +396,26 @@ describe("agent loop event contract", () => {
     expect(msgSig).toBe("sig-teks");
   });
 });
+
+describe("stop (AbortSignal)", () => {
+  it("run yang dibatalkan selagi tool jalan tidak menjalankan tool dan selesai stopped", async () => {
+    const ctrl = new AbortController();
+    const llm: LlmClient = {
+      async chat() {
+        // Pengguna menekan Stop selagi model menjawab.
+        ctrl.abort();
+        return withCalls(
+          call("t1", "write_file", { path: "a.txt", content: "x" }),
+        );
+      },
+    };
+    const { workspace, events, result } = await run([], {
+      llm,
+      signal: ctrl.signal,
+    });
+    expect(result.status).toBe("stopped");
+    expect(ofType(events, "tool_call_started")).toEqual([]);
+    await expect(readFile(join(workspace, "a.txt"), "utf8")).rejects.toThrow();
+    expectWellFormed(events);
+  });
+});

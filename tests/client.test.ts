@@ -671,3 +671,62 @@ describe("Gemini thought signature round-trip", () => {
     expect(args).toEqual(["{}", "{}", '{"path":"a.txt"}']);
   });
 });
+
+describe("streamed tool-call reassembly", () => {
+  const namedToolCallChunk = (id: string, name: string, args: string) =>
+    JSON.stringify({
+      id: "chatcmpl-test",
+      object: "chat.completion.chunk",
+      created: 1,
+      model: "test-model",
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              {
+                index: 0,
+                id,
+                type: "function",
+                function: { name, arguments: args },
+              },
+            ],
+          },
+          finish_reason: null,
+        },
+      ],
+    });
+
+  it("splits two tool calls that reuse index 0 with different ids", async () => {
+    await withSseServer(
+      [
+        [
+          namedToolCallChunk("call_a", "read_skill", '{"name":"website"}'),
+          namedToolCallChunk("call_b", "list_dir", '{"path":"."}'),
+          finishChunk("tool_calls"),
+        ],
+      ],
+      "/v1",
+      async (_bodies, baseURL) => {
+        const llm = createOpenAiLlm({
+          baseURL,
+          apiKey: "test-key",
+          quota: { enabled: false },
+        });
+        const r = await llm.chat({
+          model: "test-model",
+          messages: [{ role: "user", content: "bikin website" }],
+          tools: [],
+        });
+        expect(r.toolCalls.map((c) => c.function.name)).toEqual([
+          "read_skill",
+          "list_dir",
+        ]);
+        expect(r.toolCalls.map((c) => c.id)).toEqual(["call_a", "call_b"]);
+        expect(r.toolCalls[1]?.function.arguments).toBe('{"path":"."}');
+      },
+    );
+  });
+});

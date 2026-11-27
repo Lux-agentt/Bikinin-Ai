@@ -13,10 +13,11 @@ export async function runTool(
   name: string,
   raw: unknown,
   workspace: string,
+  extraCtx: Partial<import("../src/tools/types.js").ToolContext> = {},
 ): Promise<ToolResult> {
   const tool = getTool(name);
   if (!tool) throw new Error(`tool tidak ada: ${name}`);
   const parsed = tool.parse(raw);
   if (!parsed.ok) throw new Error(`argumen tidak valid: ${parsed.error}`);
-  return parsed.execute({ workspace });
+  return parsed.execute({ workspace, ...extraCtx });
 }

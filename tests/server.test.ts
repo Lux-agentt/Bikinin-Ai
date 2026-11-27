@@ -694,6 +694,44 @@ describe("web server", () => {
     ).toBe(404);
   });
 
+  it("downloads a session transcript as markdown", async () => {
+    const { url } = await boot([
+      withCalls(plan("t0")),
+      withCalls(
+        call("t1", "write_file", {
+          path: "index.html",
+          content: "<h1>Kopi</h1>",
+        }),
+      ),
+      finalText("Selesai."),
+    ]);
+    const started = await post(`${url}/api/runs`, { message: "buat halaman" });
+    expect(started.status).toBe(201);
+    const { run_id, session_id } = (await started.json()) as {
+      run_id: string;
+      session_id: string;
+    };
+    await (await fetch(`${url}/api/runs/${run_id}/events`)).text();
+
+    const res = await fetch(`${url}/api/sessions/${session_id}/transcript`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+    expect(res.headers.get("content-disposition")).toBe(
+      'attachment; filename="buat halaman.md"',
+    );
+    const md = await res.text();
+    expect(md).toContain("# buat halaman");
+    expect(md).toContain("**Pengguna:** buat halaman");
+    expect(md).toContain("**Agent:** Selesai.");
+    expect(md).toContain("write_file");
+    expect(md).toContain("index.html");
+    expect(md).toContain("**Selesai:** completed");
+
+    expect(
+      (await fetch(`${url}/api/sessions/s_deadbeef/transcript`)).status,
+    ).toBe(404);
+  });
+
   it("downloads a single file as an attachment, without the zip size cap", async () => {
     const { url, workspace } = await boot([
       withCalls(plan("t0")),

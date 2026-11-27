@@ -278,9 +278,13 @@ Satu format pesan untuk **CLI** dan **UI**. Agent hanya memanggil `emit(type, da
 | DELETE | `/api/sessions/:id`              | Hapus sesi (transkrip + ledger); 404 bila tidak ada, 409 bila masih ada run yang berjalan di sesi itu    |
 | GET    | `/api/sessions/:id/files`        | Pohon file workspace sesi                                                                                |
 | GET    | `/api/sessions/:id/download.zip` | Unduh proyek                                                                                             |
+| GET    | `/api/sessions/:id/transcript` | Unduh transkrip percakapan sesi sebagai Markdown (.md): pesan user, teks agent, tool call + hasil (dipotong wajar), verifikasi, ringkasan run; nama file dari judul sesi (atau id bila kosong); 404 bila sesi tidak ada |
 | GET    | `/api/sessions/:id/download?path=` | Unduh satu file sebagai attachment (mis. video MP4), tanpa batas 5 MB seperti zip; path di dalam workspace, file rahasia ditolak |
 | GET    | `/api/skills`                    | Daftar skill (nama + deskripsi dari frontmatter `SKILL.md`)                                              |
 | POST   | `/api/skills`                    | Pasang skill dari link GitHub (`url`) atau isi SKILL.md (`content`); 201, 400 validasi, 409 sudah ada, 502 unduh gagal |
+| POST   | `/api/evals`                     | Jalankan benchmark Fase 7 pada satu provider. Body `{model, tasks?}`; `model` = nama provider (atau id model), `tasks` = daftar id dari 16 tugas (kosong = semua); 201 `{eval}`, 400 provider/tugas tidak dikenal, 409 masih ada eval yang berjalan |
+| GET    | `/api/evals`                     | Daftar eval + katalog 16 tugas (`{tasks, evals}`)                                                        |
+| GET    | `/api/evals/:id`                 | Status satu eval + ekor log (`log`, 60 baris terakhir); 404 bila tidak ada                               |
 | GET    | `/api/checkpoints`               | Daftar checkpoint (id, waktu, metode, jumlah file)                                                       |
 | POST   | `/api/checkpoints/:id/restore`   | Pulihkan workspace ke checkpoint (aksi eksplisit pengguna; tercatat sebagai event `checkpoint_restored`) |
 

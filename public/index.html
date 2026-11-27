@@ -791,6 +791,9 @@
             >
               Checkpoint
             </button>
+            <button type="button" class="stab" data-ftab="evals" role="tab">
+              Eval
+            </button>
           </div>
           <button
             type="button"
@@ -854,6 +857,25 @@
             kembali ke isi saat checkpoint dibuat.
           </p>
           <div id="sheetCheckpointList"></div>
+        </div>
+        <div class="sheet-body" id="tabEvals" hidden>
+          <p class="skill-note">
+            Jalankan 16 tugas benchmark Fase 7 pada satu provider untuk
+            mengukur skornya. Satu batch penuh memakan waktu ~10–25 menit;
+            hasilnya tersimpan di <code>workspace/.bikinin/evals/</code>.
+            Kosongkan semua centang untuk menjalankan semua tugas.
+          </p>
+          <div class="skill-form">
+            <select
+              id="evalModelSelect"
+              aria-label="Provider untuk eval"
+            ></select>
+            <div class="eval-tasks" id="evalTaskList"></div>
+            <button type="button" class="skill-save" id="evalRunBtn">
+              Jalankan eval
+            </button>
+          </div>
+          <div id="evalList"></div>
         </div>
       </div>
     </div>

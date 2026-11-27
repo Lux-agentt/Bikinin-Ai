@@ -177,10 +177,16 @@ export class RunManager {
     return {
       model: primary?.model ?? "",
       models: [...new Set(this.cfg.providers.map((p) => p.model))],
+      providers: this.cfg.providers.map((p) => p.name),
       usd_idr: this.cfg.BIKININ_USD_IDR,
       max_steps: this.cfg.BIKININ_MAX_STEPS,
       max_cost_usd: this.cfg.BIKININ_MAX_COST_USD,
     };
+  }
+
+  /** Provider names + models for the eval tab and EvalManager (no keys/URLs). */
+  listProviders(): Array<{ name: string; model: string }> {
+    return this.cfg.providers.map((p) => ({ name: p.name, model: p.model }));
   }
 
   get(runId: string): RunRecord | undefined {

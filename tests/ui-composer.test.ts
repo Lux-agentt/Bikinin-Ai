@@ -44,3 +44,46 @@ describe("animasi coding saat run", () => {
     expect(css).toContain(".code-anim-cursor");
   });
 });
+
+describe("stop membebaskan UI yang macet", () => {
+  it("stopRun mengenali run yang sudah hilang (404) dan mematikan busy", () => {
+    expect(js).toMatch(
+      /async function stopRun\(\) \{[\s\S]*?r\.status === 404[\s\S]*?setBusy\(false\)/,
+    );
+  });
+});
+
+describe("tab Eval di folder sheet", () => {
+  it("markup: tombol tab + body Eval dengan select provider, daftar tugas, tombol jalan", () => {
+    expect(html).toContain('data-ftab="evals"');
+    expect(html).toContain('id="tabEvals"');
+    expect(html).toContain('id="evalModelSelect"');
+    expect(html).toContain('id="evalTaskList"');
+    expect(html).toContain('id="evalRunBtn"');
+    expect(html).toContain('id="evalList"');
+  });
+
+  it("app.js: switchFolderTab menangani evals dan renderSheetEvals memakai /api/evals", () => {
+    expect(js).toContain('$("#tabEvals").hidden = tabName !== "evals"');
+    expect(js).toContain("renderSheetEvals");
+    expect(js).toContain('fetchJson("/api/evals")');
+    expect(js).toContain('fetch("/api/evals", {');
+    expect(js).toContain("toggleEvalLog");
+  });
+
+  it("css punya daftar tugas scroll + blok log ekor", () => {
+    expect(css).toContain(".eval-tasks");
+    expect(css).toContain(".eval-log");
+  });
+});
+
+describe("unduh transkrip di riwayat", () => {
+  it("renderSheetHistory punya tautan transcript di samping ZIP", () => {
+    expect(js).toContain("/transcript");
+    expect(js).toContain("Unduh transkrip percakapan (.md)");
+    expect(js).toMatch(
+      /tr\.href = `\/api\/sessions\/\$\{sess\.session_id\}\/transcript`/,
+    );
+    expect(js).toMatch(/item\.append\(mainEl, dl, tr, del\)/);
+  });
+});

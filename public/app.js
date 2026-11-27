@@ -36,6 +36,9 @@ const state = {
   pendingFiles: [], // File[] chosen via + button, uploaded when the run starts
   versions: [], // { path, bytes, title, content: string|null, runId }
   activeVersion: -1,
+  evalSelected: null, // Set<string> | null — tugas eval yang dicentang (null = semua)
+  evalModel: null, // provider yang dipilih di tab Eval
+  evalOpenLog: null, // id eval yang log-nya sedang dibuka
   resultCard: null,
   overlayVersion: null,
   overlayFiles: [],
@@ -471,9 +474,12 @@ function switchFolderTab(tabName) {
   $("#tabHistory").hidden = tabName !== "history";
   $("#tabSkills").hidden = tabName !== "skills";
   $("#tabCheckpoints").hidden = tabName !== "checkpoints";
+  $("#tabEvals").hidden = tabName !== "evals";
   if (tabName === "history") void renderSheetHistory();
   if (tabName === "skills") void renderSheetSkills();
   if (tabName === "checkpoints") void renderSheetCheckpoints();
+  if (tabName === "evals") void renderSheetEvals();
+  else stopEvalPoll();
 }
 
 function renderSheetHistory() {
@@ -514,6 +520,13 @@ function renderSheetHistory() {
         dl.setAttribute("aria-label", "Unduh proyek sebagai ZIP");
         dl.innerHTML =
           '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>';
+        const tr = document.createElement("a");
+        tr.className = "exp-del";
+        tr.href = `/api/sessions/${sess.session_id}/transcript`;
+        tr.title = "Unduh transkrip percakapan (.md)";
+        tr.setAttribute("aria-label", "Unduh transkrip percakapan (.md)");
+        tr.innerHTML =
+          '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>';
         const del = document.createElement("button");
         del.type = "button";
         del.className = "exp-del";
@@ -543,7 +556,7 @@ function renderSheetHistory() {
           else void renderSheetHistory();
           toast("Riwayat dihapus.");
         });
-        item.append(mainEl, dl, del);
+        item.append(mainEl, dl, tr, del);
         box.appendChild(item);
       }
     })
@@ -698,6 +711,198 @@ function renderSheetCheckpoints() {
       box.appendChild(empty);
     });
 }
+
+// ---------- Eval tab (Fitur 3) ----------
+let evalPoll = null;
+function stopEvalPoll() {
+  if (evalPoll) {
+    clearInterval(evalPoll);
+    evalPoll = null;
+  }
+}
+
+function evalStatusLabel(status) {
+  return status === "running"
+    ? "Berjalan"
+    : status === "done"
+      ? "Selesai"
+      : "Gagal";
+}
+
+function renderSheetEvals() {
+  const box = $("#evalList");
+  box.replaceChildren();
+  stopEvalPoll();
+  return fetchJson("/api/evals")
+    .then((data) => {
+      const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+      const evals = Array.isArray(data.evals) ? data.evals : [];
+      // Provider select: nama provider dari /api/config (bukan id model —
+      // scripts/eval.ts mencari provider berdasarkan nama).
+      const providers =
+        Array.isArray(state.cfg?.providers) && state.cfg.providers.length
+          ? state.cfg.providers
+          : [];
+      const sel = $("#evalModelSelect");
+      sel.replaceChildren();
+      if (!providers.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "Belum ada provider";
+        sel.appendChild(opt);
+      } else {
+        for (const name of providers) {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          sel.appendChild(opt);
+        }
+        if (state.evalModel && providers.includes(state.evalModel))
+          sel.value = state.evalModel;
+      }
+      sel.onchange = () => {
+        state.evalModel = sel.value;
+      };
+      // Task checkboxes: centang semua secara default; kosongkan semua
+      // untuk menjalankan semua tugas.
+      if (!state.evalSelected)
+        state.evalSelected = new Set(tasks.map((t) => t.id));
+      const taskBox = $("#evalTaskList");
+      taskBox.replaceChildren();
+      for (const t of tasks) {
+        const row = document.createElement("label");
+        row.className = "skill-item";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = state.evalSelected.has(t.id);
+        cb.addEventListener("change", () => {
+          if (cb.checked) state.evalSelected.add(t.id);
+          else state.evalSelected.delete(t.id);
+        });
+        const meta = document.createElement("div");
+        meta.className = "skill-meta";
+        const name = document.createElement("b");
+        name.textContent = t.id;
+        const desc = document.createElement("small");
+        desc.textContent = t.title;
+        meta.append(name, desc);
+        const tag = document.createElement("span");
+        tag.className = "skill-tag";
+        tag.textContent = t.category;
+        row.append(cb, meta, tag);
+        taskBox.appendChild(row);
+      }
+      if (!evals.length) {
+        const empty = document.createElement("div");
+        empty.className = "exp-empty";
+        empty.textContent =
+          "Belum ada eval. Pilih provider dan tugas, lalu jalankan.";
+        box.appendChild(empty);
+      }
+      for (const ev of evals) {
+        const item = document.createElement("div");
+        item.className = "exp-item";
+        const mainEl = document.createElement("div");
+        mainEl.className = "exp-main";
+        const title = document.createElement("b");
+        title.textContent = `${ev.model} · ${ev.tasks.length} tugas`;
+        const meta = document.createElement("small");
+        const started = new Date(ev.startedAt).toLocaleString("id-ID", {
+          day: "numeric",
+          month: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        const dur = ev.finishedAt
+          ? ` · ${Math.round((ev.finishedAt - ev.startedAt) / 1000)} dtk`
+          : "";
+        meta.textContent = `${started}${dur} · ${ev.id}`;
+        mainEl.append(title, meta);
+        const tag = document.createElement("span");
+        tag.className = "skill-tag";
+        tag.textContent = evalStatusLabel(ev.status);
+        const logBtn = document.createElement("button");
+        logBtn.type = "button";
+        logBtn.className = "cp-restore";
+        logBtn.textContent = "Log";
+        logBtn.addEventListener("click", () => void toggleEvalLog(item, ev.id));
+        item.append(mainEl, tag, logBtn);
+        box.appendChild(item);
+        if (state.evalOpenLog === ev.id) void toggleEvalLog(item, ev.id, true);
+      }
+      // Selama ada eval berjalan, segarkan daftar tiap 10 detik selagi
+      // tab ini terbuka — satu batch bisa 10-25 menit.
+      if (evals.some((ev) => ev.status === "running")) {
+        evalPoll = setInterval(() => {
+          if (!$("#tabEvals").hidden) void renderSheetEvals();
+          else stopEvalPoll();
+        }, 10_000);
+      }
+    })
+    .catch(() => {
+      const empty = document.createElement("div");
+      empty.className = "exp-empty";
+      empty.textContent = "Daftar eval gagal dimuat dari server.";
+      box.appendChild(empty);
+    });
+}
+
+async function toggleEvalLog(item, evalId, reopen = false) {
+  const old = item.querySelector(".eval-log-wrap");
+  if (old && !reopen) {
+    old.remove();
+    if (state.evalOpenLog === evalId) state.evalOpenLog = null;
+    return;
+  }
+  if (old) old.remove();
+  state.evalOpenLog = evalId;
+  const wrap = document.createElement("div");
+  wrap.className = "eval-log-wrap";
+  const pre = document.createElement("pre");
+  pre.className = "eval-log";
+  pre.textContent = "Memuat log…";
+  wrap.appendChild(pre);
+  item.appendChild(wrap);
+  try {
+    const data = await fetchJson(`/api/evals/${evalId}`);
+    pre.textContent = data.log || "(log masih kosong)";
+  } catch {
+    pre.textContent = "Log gagal dimuat.";
+  }
+}
+
+$("#evalRunBtn").addEventListener("click", async () => {
+  const model = $("#evalModelSelect").value;
+  if (!model) {
+    toast("Belum ada provider — isi .env dulu.");
+    return;
+  }
+  const tasks = state.evalSelected ? [...state.evalSelected] : [];
+  const btn = $("#evalRunBtn");
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/evals", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model, tasks }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 409) {
+      toast("Masih ada eval yang berjalan — tunggu sampai selesai.");
+      return;
+    }
+    if (!r.ok) {
+      toast(data.error ?? "Gagal menjalankan eval.");
+      return;
+    }
+    toast(`Eval dimulai (${data.eval.model}, ${data.eval.tasks.length} tugas).`);
+    void renderSheetEvals();
+  } catch {
+    toast("Gagal menjalankan eval.");
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 function bindHero() {
   // The design stores per-sheet CSS variables inline; CSP forbids inline style, so set them here.
@@ -1846,7 +2051,18 @@ async function start(message) {
 async function stopRun() {
   if (!state.busy || !state.runId) return;
   try {
-    await fetch(`/api/runs/${state.runId}/stop`, { method: "POST" });
+    const r = await fetch(`/api/runs/${state.runId}/stop`, { method: "POST" });
+    if (r.status === 404) {
+      // Run sudah tidak ada di server (mis. server di-restart selagi UI
+      // masih menampilkan "berjalan", atau run selesai tapi event
+      // run_finished tidak sampai): bebaskan UI supaya riwayat dan tombol
+      // lain bisa dipakai lagi, bukan terkunci di "Hentikan agent dulu".
+      if (state.source) state.source.close();
+      state.source = null;
+      setBusy(false);
+      toast("Agent sudah berhenti — run tidak ditemukan di server.");
+      return;
+    }
     toast("Menghentikan agent…");
   } catch {
     toast("Gagal mengirim perintah henti.");

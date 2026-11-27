@@ -2215,6 +2215,59 @@ main::-webkit-scrollbar {
   padding: 1px 5px;
   border-radius: 5px;
 }
+
+/* ===== Eval tab (folder sheet) ===== */
+.skill-form select {
+  width: 100%;
+  border: 1px solid var(--line-2);
+  background: var(--panel);
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.skill-form select:focus {
+  border-color: var(--blue);
+}
+.eval-tasks {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 6px;
+}
+.eval-tasks .skill-item {
+  margin-bottom: 5px;
+}
+.eval-tasks .skill-item:last-child {
+  margin-bottom: 0;
+}
+.eval-tasks input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  accent-color: var(--blue);
+}
+.eval-log-wrap {
+  flex-basis: 100%;
+}
+.eval-log {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--muted);
+  background: rgba(5, 8, 16, 0.7);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px;
+  margin: 8px 0 0;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .skill-add:disabled,
 .plus:disabled {
   opacity: 0.45;

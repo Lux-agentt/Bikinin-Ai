@@ -102,13 +102,13 @@ interface ExecResult {
 type ExecFn = (
   file: string,
   args: string[],
-  opts: { cwd: string; timeout: number },
+  opts: { cwd: string; timeout: number; signal?: AbortSignal },
 ) => Promise<ExecResult>;
 
 function defaultExec(
   file: string,
   args: string[],
-  opts: { cwd: string; timeout: number },
+  opts: { cwd: string; timeout: number; signal?: AbortSignal },
 ): Promise<ExecResult> {
   return new Promise((resolve) => {
     execFile(
@@ -118,6 +118,8 @@ function defaultExec(
         cwd: opts.cwd,
         timeout: opts.timeout,
         maxBuffer: MAX_BUFFER,
+        // Stop membunuh proses render yang sedang jalan.
+        signal: opts.signal,
         env: safeEnv(process.env),
       },
       (error, stdout, stderr) => {
@@ -259,7 +261,11 @@ export async function executeRenderVideo(
 
   const { file: bin, prefix } = await remotionCommand(projectAbs);
   const run = (sub: string[], timeout: number): Promise<ExecResult> =>
-    exec(bin, [...prefix, ...sub], { cwd: projectAbs, timeout });
+    exec(bin, [...prefix, ...sub], {
+      cwd: projectAbs,
+      timeout,
+      signal: ctx.signal,
+    });
 
   // 1. Ukur komposisi dari Remotion sendiri (bukan dari klaim model).
   const comps = await run(["compositions"], COMPOSITIONS_TIMEOUT_MS);

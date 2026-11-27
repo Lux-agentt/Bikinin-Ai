@@ -472,6 +472,24 @@ describe.skipIf(!SANDBOX_AVAILABLE)("sandbox: unshare (live)", () => {
     expect(r.output).toContain("halo-sandbox");
   });
 
+  it("run_command yang sedang jalan mati saat sinyal stop dibatalkan", async () => {
+    const ws = await tempWorkspace();
+    await writeFile(join(ws, "tidur.js"), "setTimeout(() => {}, 30000);");
+    const ctrl = new AbortController();
+    const started = Date.now();
+    const p = runTool(
+      "run_command",
+      { command: "node tidur.js" },
+      ws,
+      { signal: ctrl.signal },
+    );
+    setTimeout(() => ctrl.abort(), 100);
+    const r = await p;
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(r.ok).toBe(false);
+    expect(r.summary).toMatch(/dihentikan pengguna/);
+  });
+
   it("perintah confirm yang lolos approval tetap gagal mengakses network (lapis: sandbox)", async () => {
     // runTool mengeksekusi langsung seperti loop sesudah approval: classifier
     // memberi "confirm" untuk curl polos, tapi sandbox mematikan network.

@@ -16,6 +16,8 @@ import { resolveInWorkspace } from "../safety/paths.js";
 import { installSkill, InstallError } from "../skills/install.js";
 import { listSkills, skillsDir } from "../skills/loader.js";
 import { BusyError, NotConfiguredError, BadAttachmentError, type RunManager } from "./runs.js";
+import { EvalManager } from "./evals.js";
+import { buildTranscript, transcriptFilename } from "./transcript.js";
 import { buildZip } from "./zip.js";
 import { listCheckpoints } from "./checkpoints.js";
 import { saveUploads, UploadError } from "./uploads.js";
@@ -270,6 +272,7 @@ async function route(
   res: ServerResponse,
   manager: RunManager,
   workspace: string,
+  evals: EvalManager,
 ): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
@@ -332,6 +335,35 @@ async function route(
     }
   }
 
+  // Fitur 3: eval benchmark (Fase 7) dari UI. Satu eval dalam satu waktu;
+  // proses anaknya jalan 10-25 menit untuk satu batch penuh.
+  if (method === "POST" && path === "/api/evals") {
+    const body = (await readJson(req)) as {
+      model?: unknown;
+      tasks?: unknown;
+    };
+    const r = evals.start(body.model, body.tasks);
+    if ("error" in r) {
+      if (r.error === "busy") throw new HttpError(409, r.message);
+      throw new HttpError(400, r.message);
+    }
+    return sendJson(res, 201, { eval: r.record });
+  }
+
+  if (method === "GET" && path === "/api/evals") {
+    return sendJson(res, 200, {
+      tasks: evals.taskCatalog(),
+      evals: evals.list(),
+    });
+  }
+
+  const em = path.match(/^\/api\/evals\/(eval_[a-f0-9]{8})$/);
+  if (method === "GET" && em) {
+    const rec = evals.get(em[1]);
+    if (!rec) throw new HttpError(404, "eval tidak ditemukan");
+    return sendJson(res, 200, { ...rec, log: await evals.logTail(em[1]) });
+  }
+
   // Fase 5: checkpoints. Restore is an explicit user action (POST only)
   // and is recorded as a `checkpoint_restored` event in the session log.
   if (method === "GET" && path === "/api/checkpoints") {
@@ -351,13 +383,26 @@ async function route(
   }
 
   const sm = path.match(
-    /^\/api\/sessions\/(s_[a-f0-9]{8})(\/files|\/download\.zip|\/download|\/ledger)?$/,
+    /^\/api\/sessions\/(s_[a-f0-9]{8})(\/files|\/download\.zip|\/download|\/ledger|\/transcript)?$/,
   );
   if (method === "GET" && sm) {
     const [, sessionId, action] = sm;
     const sess = await manager.getSession(sessionId);
     if (!sess) throw new HttpError(404, "sesi tidak ditemukan");
     if (!action) return sendJson(res, 200, sess);
+    if (action === "/transcript") {
+      const body = Buffer.from(buildTranscript(sess), "utf8");
+      const filename = transcriptFilename(sess).replace(/["\r\n]/g, "");
+      res.writeHead(200, {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length": String(body.length),
+        "Cache-Control": "no-store",
+        ...SECURITY_HEADERS,
+      });
+      res.end(body);
+      return;
+    }
     if (action === "/ledger") {
       return sendJson(res, 200, await manager.getLedger(sessionId));
     }
@@ -464,10 +509,11 @@ async function route(
 export function createAppServer(
   manager: RunManager,
   workspace: string,
+  evals: EvalManager = new EvalManager(workspace, manager.listProviders()),
 ): Server {
   return createServer(async (req, res) => {
     try {
-      await route(req, res, manager, workspace);
+      await route(req, res, manager, workspace, evals);
     } catch (err) {
       if (res.headersSent) {
         res.end();

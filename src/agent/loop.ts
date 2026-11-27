@@ -472,6 +472,7 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         workspace: d.workspace,
         delegate: delegateRunner,
         describeImage: d.describeImage,
+        signal: d.signal,
       });
       for (const c of res.changes) {
         // Fase 6: diff review — fill the optional diff field for files the
@@ -593,6 +594,17 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
     const jobs: Job[] = [];
 
     for (const call of calls) {
+      // Stop ditekan selagi batch tool disusun: jangan antrekan panggilan
+      // yang belum jalan (run berhenti di pemeriksaan sinyal setelah batch).
+      if (d.signal?.aborted) {
+        results.set(call.id, {
+          id: call.id,
+          content: "Dihentikan pengguna.",
+          failed: true,
+          key: `${call.function.name}:${call.function.arguments}`,
+        });
+        continue;
+      }
       const tool = findTool(call.function.name);
       if (!tool) {
         emit("error", {
@@ -669,8 +681,20 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
       const outs = await Promise.all(orderedJobs.map(runJob));
       for (const o of outs) results.set(o.id, o);
     } else {
-      for (const job of orderedJobs)
+      for (const job of orderedJobs) {
+        // Stop ditekan selagi satu tool jalan: jangan mulai tool
+        // berikutnya dalam batch ini.
+        if (d.signal?.aborted) {
+          results.set(job.call.id, {
+            id: job.call.id,
+            content: "Dihentikan pengguna.",
+            failed: true,
+            key: `${job.tool.name}:${job.call.function.arguments}`,
+          });
+          continue;
+        }
         results.set(job.call.id, await runJob(job));
+      }
     }
 
     const outputs = calls.map(

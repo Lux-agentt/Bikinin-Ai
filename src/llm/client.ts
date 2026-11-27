@@ -464,6 +464,15 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
             number,
             { id: string; name: string; args: string; thoughtSignature?: string }
           >();
+          // Panggilan yang selesai lebih dulu karena index-nya dipakai ulang
+          // oleh panggilan berikutnya (lihat di bawah).
+          const finished: Array<{
+            index: number;
+            id: string;
+            name: string;
+            args: string;
+            thoughtSignature?: string;
+          }> = [];
 
           for await (const chunk of stream) {
             received = true;
@@ -486,24 +495,41 @@ export function createOpenAiLlm(opts: LlmOptions): LlmClient {
             const msgSig = readThoughtSignature(delta);
             if (msgSig) messageThoughtSignature = msgSig;
             for (const tc of delta.tool_calls ?? []) {
-              const slot = partial.get(tc.index) ?? {
-                id: "",
-                name: "",
-                args: "",
-              };
+              let slot = partial.get(tc.index);
+              if (!slot) {
+                slot = { id: "", name: "", args: "" };
+                partial.set(tc.index, slot);
+              } else if (tc.id && slot.id && tc.id !== slot.id) {
+                // Provider memakai ulang index yang sama untuk panggilan
+                // berbeda (ditemukan di model kecil lewat OpenRouter): tanpa
+                // pemisah ini nama + argumen dua panggilan menyatu jadi satu
+                // nama sampah ("read_skillread_skilllist_dir") yang tidak ada
+                // di registry, lalu agent muter 3x di panggilan yang sama.
+                // ID yang sama = lanjutan panggilan yang sama (digabung);
+                // ID baru di index yang sama = panggilan baru (dipisah).
+                finished.push({ index: tc.index, ...slot });
+                slot = { id: "", name: "", args: "" };
+                partial.set(tc.index, slot);
+              }
               if (tc.id) slot.id = tc.id;
               if (tc.function?.name) slot.name += tc.function.name;
               if (tc.function?.arguments) slot.args += tc.function.arguments;
               const sig = readThoughtSignature(tc);
               if (sig) slot.thoughtSignature = sig;
-              partial.set(tc.index, slot);
             }
           }
 
-          const toolCalls = [...partial.entries()]
-            .sort(([a], [b]) => a - b)
-            .filter(([, s]) => s.name !== "")
-            .map(([i, s]): ToolCallReq => ({
+          const toolCalls = [
+            ...finished,
+            ...[...partial.entries()].map(([index, s]) => ({
+              index,
+              ...s,
+            })),
+          ]
+            // Sort stabil: index yang sama mempertahankan urutan kedatangan.
+            .sort((a, b) => a.index - b.index)
+            .filter((s) => s.name !== "")
+            .map((s, i): ToolCallReq => ({
               id: s.id || `call_bikinin_${generatedCallId++}_${i}`,
               type: "function",
               function: { name: s.name, arguments: s.args || "{}" },

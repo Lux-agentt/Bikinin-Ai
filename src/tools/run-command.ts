@@ -155,6 +155,7 @@ function sandboxFailure(output: string): AgentError {
 export async function execSandboxed(
   command: string,
   cwd: string,
+  signal?: AbortSignal,
 ): Promise<ShellResult> {
   let ws: string;
   try {
@@ -190,6 +191,10 @@ export async function execSandboxed(
         cwd: ws,
         timeout: TIMEOUT_MS,
         maxBuffer: MAX_BUFFER,
+        // Stop membunuh proses luar (unshare); proses di dalam namespace
+        // yang sudah jalan tidak ikut mati, tapi janji ini selesai dan
+        // timeout 120 dtk tetap jadi batas atasnya.
+        signal,
         env: {
           ...safeEnv(process.env),
           HOME: "/tmp/.bikinin-home",
@@ -235,6 +240,7 @@ function execShell(
   cwd: string,
   timeoutMs = TIMEOUT_MS,
   maxBuffer = MAX_BUFFER,
+  signal?: AbortSignal,
 ): Promise<ShellResult> {
   return new Promise((resolve) => {
     execFile(
@@ -244,6 +250,7 @@ function execShell(
         cwd,
         timeout: timeoutMs,
         maxBuffer,
+        signal,
         env: { ...safeEnv(process.env), GIT_CEILING_DIRECTORIES: dirname(cwd) },
       },
       (error, stdout, stderr) => {
@@ -293,10 +300,15 @@ export const runCommandTool = defineTool({
           ctx.workspace,
           INSTALL_TIMEOUT_MS,
           INSTALL_MAX_BUFFER,
+          ctx.signal,
         )
       : sandboxEnabled()
-        ? await execSandboxed(a.command, ctx.workspace)
-        : await execShell(a.command, ctx.workspace);
+        ? await execSandboxed(a.command, ctx.workspace, ctx.signal)
+        : await execShell(a.command, ctx.workspace, undefined, undefined, ctx.signal);
+    // Stop ditekan selagi perintah jalan: laporkan sebagai dihentikan,
+    // bukan sebagai timeout/gagal biasa.
+    if (ctx.signal?.aborted)
+      return { ok: false, summary: "dihentikan pengguna", output: r.output, changes: [] };
     const summary = r.killed
       ? `timeout (${isInstall ? 300 : 120} dtk)`
       : r.ok
