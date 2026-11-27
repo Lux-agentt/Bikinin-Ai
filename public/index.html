@@ -587,7 +587,19 @@
             <path d="m6 9 6 6 6-6" />
           </svg>
         </button>
-        <div class="think-drawer"><div class="think-lines"></div></div>
+        <div class="think-drawer">
+          <div class="code-anim" hidden>
+            <div class="code-anim-cmd">
+              <span class="code-anim-prompt" aria-hidden="true">›</span>
+              <span class="code-anim-text">Menulis kode…</span>
+              <span class="code-anim-cursor" aria-hidden="true">▍</span>
+            </div>
+            <div class="code-anim-bars" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </div>
+          </div>
+          <div class="think-lines"></div>
+        </div>
       </div>
     </template>
 
@@ -811,15 +823,27 @@
               type="button"
               class="skill-add"
               id="skillAddBtn"
-              disabled
-              title="Skill didefinisikan di repo, bukan dari browser"
+              title="Tambah skill dari link GitHub"
             >
               + Tambah skill
             </button>
           </div>
+          <div class="skill-form" id="skillForm" hidden>
+            <input
+              type="url"
+              id="skillUrlInput"
+              placeholder="Link GitHub ke SKILL.md"
+              aria-label="Link GitHub ke SKILL.md"
+            />
+            <button type="button" class="skill-save" id="skillSaveBtn">
+              Pasang skill
+            </button>
+          </div>
           <p class="skill-note">
             Skill dibaca server dari folder <code>skills/*/SKILL.md</code> di
-            repo. Menambah skill dilakukan di repo, lalu server di-restart.
+            repo. Tempel link GitHub di atas, atau tempel isi SKILL.md di chat
+            dan minta agent memasangnya — skill baru tersedia di run
+            berikutnya, tanpa restart.
           </p>
           <div id="sheetSkillList"></div>
         </div>

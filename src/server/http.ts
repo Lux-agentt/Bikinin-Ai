@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import { AgentError } from "../errors.js";
 import { ApprovalBody, StartRunBody, toSSE } from "../events.js";
 import { resolveInWorkspace } from "../safety/paths.js";
-import { listSkills, REPO_SKILLS_DIR } from "../skills/loader.js";
+import { installSkill, InstallError } from "../skills/install.js";
+import { listSkills, skillsDir } from "../skills/loader.js";
 import { BusyError, NotConfiguredError, BadAttachmentError, type RunManager } from "./runs.js";
 import { buildZip } from "./zip.js";
 import { listCheckpoints } from "./checkpoints.js";
@@ -301,7 +302,34 @@ async function route(
   }
 
   if (method === "GET" && path === "/api/skills") {
-    return sendJson(res, 200, await listSkills(REPO_SKILLS_DIR));
+    return sendJson(res, 200, await listSkills(skillsDir()));
+  }
+
+  if (method === "POST" && path === "/api/skills") {
+    const body = (await readJson(req)) as {
+      url?: unknown;
+      content?: unknown;
+      name?: unknown;
+    };
+    const url = typeof body.url === "string" ? body.url : undefined;
+    const content =
+      typeof body.content === "string" ? body.content : undefined;
+    const name = typeof body.name === "string" ? body.name : undefined;
+    if ((url ? 1 : 0) + (content ? 1 : 0) !== 1) {
+      throw new HttpError(
+        400,
+        "isi salah satu: url (link GitHub ke SKILL.md) atau content (isi SKILL.md)",
+      );
+    }
+    try {
+      const skill = await installSkill({ url, content, name });
+      return sendJson(res, 201, { skill });
+    } catch (err) {
+      if (err instanceof InstallError) {
+        throw new HttpError(err.status, err.message);
+      }
+      throw err;
+    }
   }
 
   // Fase 5: checkpoints. Restore is an explicit user action (POST only)

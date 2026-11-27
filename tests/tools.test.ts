@@ -83,3 +83,30 @@ describe("list_dir", () => {
     expect(r.output.split("\n").sort()).toEqual(["a/", "c.txt"]);
   });
 });
+
+describe("install_skill", () => {
+  it("parses url args and always requires confirmation", async () => {
+    const { installSkillTool } = await import("../src/tools/install-skill.js");
+    const parsed = installSkillTool.parse({
+      url: "https://github.com/owner/repo/blob/main/skills/x/SKILL.md",
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.gate.decision).toBe("confirm");
+      expect(parsed.label).toBe(
+        "install_skill https://github.com/owner/repo/blob/main/skills/x/SKILL.md",
+      );
+    }
+  });
+
+  it("rejects both url and content, and neither", async () => {
+    const { installSkillTool } = await import("../src/tools/install-skill.js");
+    expect(
+      installSkillTool.parse({
+        url: "https://github.com/o/r/blob/main/SKILL.md",
+        content: "x",
+      }).ok,
+    ).toBe(false);
+    expect(installSkillTool.parse({}).ok).toBe(false);
+  });
+});

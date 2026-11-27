@@ -280,6 +280,7 @@ Satu format pesan untuk **CLI** dan **UI**. Agent hanya memanggil `emit(type, da
 | GET    | `/api/sessions/:id/download.zip` | Unduh proyek                                                                                             |
 | GET    | `/api/sessions/:id/download?path=` | Unduh satu file sebagai attachment (mis. video MP4), tanpa batas 5 MB seperti zip; path di dalam workspace, file rahasia ditolak |
 | GET    | `/api/skills`                    | Daftar skill (nama + deskripsi dari frontmatter `SKILL.md`)                                              |
+| POST   | `/api/skills`                    | Pasang skill dari link GitHub (`url`) atau isi SKILL.md (`content`); 201, 400 validasi, 409 sudah ada, 502 unduh gagal |
 | GET    | `/api/checkpoints`               | Daftar checkpoint (id, waktu, metode, jumlah file)                                                       |
 | POST   | `/api/checkpoints/:id/restore`   | Pulihkan workspace ke checkpoint (aksi eksplisit pengguna; tercatat sebagai event `checkpoint_restored`) |
 

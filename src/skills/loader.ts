@@ -18,7 +18,12 @@ export interface SkillInfo {
 }
 
 /** A skill name is a single directory name: lowercase letters, digits, -, _. */
-const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
+export const NAME_RE = /^[a-z0-9][a-z0-9_-]*$/;
+
+/** Skills dir, overridable for tests via BIKININ_SKILLS_DIR. */
+export function skillsDir(): string {
+  return process.env.BIKININ_SKILLS_DIR ?? REPO_SKILLS_DIR;
+}
 
 function stripQuotes(v: string): string {
   const t = v.trim();

@@ -6,6 +6,7 @@ import { delegateTool } from "./delegate.js";
 import { editFileTool } from "./edit-file.js";
 import { gitTool } from "./git.js";
 import { inspectImageTool } from "./inspect-image.js";
+import { installSkillTool } from "./install-skill.js";
 import { listDirTool } from "./list-dir.js";
 import { mcpCallTool } from "./mcp-call.js";
 import { readFileTool } from "./read-file.js";
@@ -33,6 +34,7 @@ export const TOOLS: RegisteredTool[] = [
   gitTool,
   mcpCallTool,
   requestPlanApprovalTool,
+  installSkillTool,
 ];
 
 export function getTool(name: string): RegisteredTool | undefined {

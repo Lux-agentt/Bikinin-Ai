@@ -595,6 +595,43 @@ function renderSheetSkills() {
     });
 }
 
+$("#skillAddBtn").addEventListener("click", () => {
+  const form = $("#skillForm");
+  form.hidden = !form.hidden;
+  if (!form.hidden) $("#skillUrlInput").focus();
+});
+
+$("#skillSaveBtn").addEventListener("click", async () => {
+  const input = $("#skillUrlInput");
+  const url = input.value.trim();
+  if (!url) {
+    toast("Tempel dulu link GitHub ke SKILL.md.");
+    return;
+  }
+  const btn = $("#skillSaveBtn");
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/skills", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      toast(data.error ?? "Gagal menambah skill.");
+      return;
+    }
+    toast(`Skill "${data.skill.name}" terpasang — tersedia di run berikutnya.`);
+    input.value = "";
+    $("#skillForm").hidden = true;
+    void renderSheetSkills();
+  } catch {
+    toast("Gagal menambah skill.");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 function renderSheetCheckpoints() {
   const box = $("#sheetCheckpointList");
   box.replaceChildren();
@@ -956,9 +993,14 @@ function addThink(label) {
     labelEl,
     timer,
     linesEl: block.querySelector(".think-lines"),
+    codeAnim: block.querySelector(".code-anim"),
+    codeAnimText: block.querySelector(".code-anim-text"),
     rows: new Map(),
     count: 0,
   };
+  if (state.think.codeAnim) state.think.codeAnim.hidden = false;
+  if (state.think.codeAnimText)
+    state.think.codeAnimText.textContent = label;
 }
 
 function thinkLine(callId, text) {
@@ -971,6 +1013,7 @@ function thinkLine(callId, text) {
   t.rows.set(callId, { line, text });
   t.count += 1;
   t.labelEl.textContent = text;
+  if (t.codeAnimText) t.codeAnimText.textContent = text;
   scrollDown();
 }
 
@@ -978,6 +1021,7 @@ function finishThink(status, steps) {
   clearInterval(state.timerInt);
   const t = state.think;
   if (!t) return;
+  if (t.codeAnim) t.codeAnim.hidden = true;
   t.timer.textContent =
     ((Date.now() - state.startedAt) / 1000).toFixed(1) + "s";
   t.labelEl.classList.remove("shimmer");

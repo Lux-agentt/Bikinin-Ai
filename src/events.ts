@@ -30,6 +30,7 @@ export const ToolName = z.enum([
   "git",
   "mcp_call",
   "request_plan_approval",
+  "install_skill",
 ]);
 
 export const Totals = z.object({

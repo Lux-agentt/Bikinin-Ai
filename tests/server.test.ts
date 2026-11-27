@@ -982,4 +982,51 @@ describe("web server", () => {
     expect(await manager.deleteSession(session_id)).toBe("ok");
     expect(await manager.deleteSession(session_id)).toBe("not-found");
   });
+
+  it("installs a skill from pasted content and lists it", async () => {
+    const skills = await mkdtemp(join(tmpdir(), "bikinin-skills-"));
+    const prev = process.env.BIKININ_SKILLS_DIR;
+    process.env.BIKININ_SKILLS_DIR = skills;
+    try {
+      const { url } = await boot([finalText("ok")]);
+      const good =
+        "---\nname: contoh-skill\ndescription: Skill contoh untuk tes.\n---\n\n# Contoh\n";
+      const created = await post(`${url}/api/skills`, { content: good });
+      expect(created.status).toBe(201);
+      expect(await created.json()).toEqual({
+        skill: {
+          name: "contoh-skill",
+          description: "Skill contoh untuk tes.",
+          bytes: Buffer.byteLength(good, "utf8"),
+        },
+      });
+      expect(
+        await readFile(join(skills, "contoh-skill", "SKILL.md"), "utf8"),
+      ).toBe(good);
+      const list = (await (
+        await fetch(`${url}/api/skills`)
+      ).json()) as Array<{ name: string }>;
+      expect(list.map((s) => s.name)).toContain("contoh-skill");
+
+      // Duplicate -> 409; bad frontmatter -> 400; neither url nor content -> 400.
+      expect(
+        (await post(`${url}/api/skills`, { content: good })).status,
+      ).toBe(409);
+      expect(
+        (await post(`${url}/api/skills`, { content: "# tanpa frontmatter" }))
+          .status,
+      ).toBe(400);
+      expect((await post(`${url}/api/skills`, {})).status).toBe(400);
+      expect(
+        (
+          await post(`${url}/api/skills`, {
+            url: "https://example.com/SKILL.md",
+          })
+        ).status,
+      ).toBe(400);
+    } finally {
+      if (prev === undefined) delete process.env.BIKININ_SKILLS_DIR;
+      else process.env.BIKININ_SKILLS_DIR = prev;
+    }
+  });
 });
