@@ -135,6 +135,14 @@ describe("tampilan proses kayak Z.ai (lipat saat selesai)", () => {
     );
   });
 
+  it("blok mulai terlipat sejak run jalan (bukan cuma setelah selesai)", () => {
+    expect(js).toMatch(
+      /function addThink\(label\) \{[\s\S]*?block\.classList\.add\("collapsed"\)/,
+    );
+    // Header tetap hidup saat terlipat: label = langkah terakhir.
+    expect(js).toMatch(/t\.labelEl\.textContent = short;/);
+  });
+
   it("header think bisa diketuk untuk buka-tutup (drawer tersembunyi saat lipat)", () => {
     expect(js).toMatch(
       /toggle\.addEventListener\("click", \(\) => \{[\s\S]*?block\.classList\.toggle\("collapsed"\)/,

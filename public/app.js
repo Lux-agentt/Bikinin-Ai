@@ -1197,6 +1197,13 @@ function addThink(label) {
     const collapsed = block.classList.toggle("collapsed");
     toggle.setAttribute("aria-expanded", String(!collapsed));
   });
+  // Kayak Z.ai (tampilan saat kerja BARU dikasih, bukan saat selesai):
+  // blok mulai terlipat — yang kelihatan saat run jalan cuma satu baris
+  // (langkah terakhir + timer). Detail langkah + panel kode ada di
+  // drawer, ketuk header untuk membuka. Sebelumnya blok kebuka penuh
+  // selama run, jadi layar penuh baris langkah.
+  block.classList.add("collapsed");
+  toggle.setAttribute("aria-expanded", "false");
   main.appendChild(block);
   scrollDown(true);
   state.startedAt = Date.now();
