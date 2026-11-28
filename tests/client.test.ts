@@ -4,8 +4,10 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
+import { APIError } from "openai";
 import { AgentError } from "../src/errors.js";
 import {
+  classify,
   createOpenAiLlm,
   echoAssistantMessage,
   echoToolCalls,
@@ -152,6 +154,25 @@ describe("provider error detail", () => {
         expect((caught as AgentError).retryable).toBe(false);
       },
     );
+  });
+
+  it("malformed tool call refusal without an HTTP status still falls over", () => {
+    // Live run 2026-11-28: DeepSeek via NanoGPT refused with "Upstream
+    // emitted malformed tool call data that could not be repaired" but NO
+    // HTTP status — the old `status === 400` guard let it kill the run
+    // instead of falling over to the next provider.
+    const err = new APIError(
+      undefined,
+      undefined,
+      "Upstream emitted malformed tool call data that could not be repaired.",
+      undefined,
+    );
+    expect(err.status).toBeUndefined();
+    const { retryable, error } = classify(err);
+    expect(error).toBeInstanceOf(AgentError);
+    expect(error.fallback).toBe(true);
+    expect(retryable).toBe(false);
+    expect(error.message).toContain("tanpa status");
   });
 
   it("a plain 400 without thought_signature still does not fall over", async () => {

@@ -127,7 +127,7 @@ function providerDetail(err: APIError): string {
   return msg.length > 300 ? `${msg.slice(0, 300)}…` : msg;
 }
 
-function classify(
+export function classify(
   err: unknown,
   shape?: string,
 ): { retryable: boolean; error: AgentError } {
@@ -187,26 +187,29 @@ function classify(
       };
     }
     if (
-      status === 400 &&
       /thought_signature|malformed tool call|could not be repaired/i.test(
         err.message,
       )
     ) {
-      // Two live 400 modes, same recovery. (1) 2026-11-19: Gemini 400'd a
+      // Same recovery for every refusal about a broken tool call, whatever
+      // HTTP status came with it (or none). (1) 2026-11-19: Gemini 400'd a
       // replayed update_plan call because the model never attached a
       // thought_signature to it (fingerprint sig:0 — nothing was captured
       // to echo). (2) 2026-11-19 22:00 WIB: "Upstream emitted malformed
       // tool call data that could not be repaired" — after a ~20-turn run
       // the model itself emitted a broken tool call and the provider
-      // refused it. In both cases retrying the same provider with the
-      // same history 400s again, but the next provider does not validate
+      // refused it. (3) 2026-11-28: the same refusal from DeepSeek via
+      // NanoGPT arrived WITHOUT an HTTP status ("tanpa status") — the old
+      // `status === 400` guard let it kill the run instead of falling
+      // over. In all cases retrying the same provider with the same
+      // history fails again, but the next provider does not validate
       // signatures and samples fresh, so fall over instead of killing
       // the run.
       return {
         retryable: false,
         error: new AgentError(
           "provider_error",
-          withDetail("Penyedia menolak request (400)") +
+          withDetail(`Penyedia menolak request (${status ?? "tanpa status"})`) +
             (shape ? ` | riwayat: ${shape}` : ""),
           false,
           true,
