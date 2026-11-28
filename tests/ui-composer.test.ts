@@ -25,23 +25,28 @@ describe("composer buttons (HP: target sentuh besar)", () => {
   });
 });
 
-describe("animasi coding saat run", () => {
-  it("template think punya blok code-anim", () => {
-    expect(html).toContain("code-anim");
-    expect(html).toContain("code-anim-text");
-    expect(html).toContain("code-anim-cursor");
+describe("panel kode live saat run (kode asli, bukan placeholder)", () => {
+  it("template think punya blok code-live dan tidak ada code-anim", () => {
+    expect(html).toContain("code-live");
+    expect(html).toContain("code-live-path");
+    expect(html).toContain("code-live-body");
+    expect(html).not.toContain("code-anim");
   });
 
-  it("app.js menampilkan, memperbarui, dan menyembunyikan code-anim", () => {
-    expect(js).toContain("codeAnim");
-    expect(js).toContain("codeAnim.hidden = false");
-    expect(js).toContain("codeAnim.hidden = true");
-    expect(js).toContain("codeAnimText.textContent = text");
+  it("app.js menampilkan kode asli dari diff file_changed dan output tool", () => {
+    expect(js).toContain("showCode(");
+    expect(js).toContain("codeLive.hidden = false");
+    expect(js).toMatch(/file_changed[\s\S]*?e\.diff[\s\S]*?showCode/);
+    expect(js).toMatch(/output_preview[\s\S]*?showCode/);
+    expect(js).not.toContain("codeAnim");
   });
 
-  it("css punya kursor berkedip untuk code-anim", () => {
-    expect(css).toContain("@keyframes blinkCursor");
-    expect(css).toContain(".code-anim-cursor");
+  it("css: code-live berlatar solid gelap (bukan transparan), tanpa shimmer bar", () => {
+    expect(css).toContain(".code-live");
+    expect(css).toMatch(/\.code-live\s*\{[^}]*background:\s*#[0-9a-f]{6}/);
+    expect(css).not.toContain(".code-anim");
+    expect(css).not.toContain("code-anim-bars");
+    expect(css).not.toContain("@keyframes blinkCursor");
   });
 });
 

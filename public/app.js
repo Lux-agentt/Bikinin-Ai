@@ -1198,14 +1198,24 @@ function addThink(label) {
     labelEl,
     timer,
     linesEl: block.querySelector(".think-lines"),
-    codeAnim: block.querySelector(".code-anim"),
-    codeAnimText: block.querySelector(".code-anim-text"),
+    codeLive: block.querySelector(".code-live"),
+    codeLivePath: block.querySelector(".code-live-path"),
+    codeLiveBody: block.querySelector(".code-live-body"),
     rows: new Map(),
     count: 0,
   };
-  if (state.think.codeAnim) state.think.codeAnim.hidden = false;
-  if (state.think.codeAnimText)
-    state.think.codeAnimText.textContent = label;
+}
+
+/** Tampilkan kode asli terbaru di panel think (diff file / output tool).
+ *  Panel hanya muncul bila ada konten nyata — tidak ada placeholder. */
+function showCode(title, body) {
+  const t = state.think;
+  if (!t || !t.codeLive || !body) return;
+  t.codeLivePath.textContent = title;
+  t.codeLiveBody.textContent = body;
+  t.codeLive.hidden = false;
+  t.codeLiveBody.scrollTop = t.codeLiveBody.scrollHeight;
+  scrollDown();
 }
 
 function thinkLine(callId, text) {
@@ -1218,7 +1228,6 @@ function thinkLine(callId, text) {
   t.rows.set(callId, { line, text });
   t.count += 1;
   t.labelEl.textContent = text;
-  if (t.codeAnimText) t.codeAnimText.textContent = text;
   scrollDown();
 }
 
@@ -1226,7 +1235,6 @@ function finishThink(status, steps) {
   clearInterval(state.timerInt);
   const t = state.think;
   if (!t) return;
-  if (t.codeAnim) t.codeAnim.hidden = true;
   t.timer.textContent =
     ((Date.now() - state.startedAt) / 1000).toFixed(1) + "s";
   t.labelEl.classList.remove("shimmer");
@@ -1821,6 +1829,14 @@ function handle(e) {
         row.line.textContent = e.summary
           ? `${row.text} — ${e.summary}`
           : row.text;
+        // Kode/output asli terbaru tampil di panel think. Label tool:
+        // run_command "$ <perintah>", read_file "read_file <path>".
+        if (
+          e.output_preview &&
+          (row.text.startsWith("$ ") || row.text.startsWith("read_file "))
+        ) {
+          showCode(row.text, e.output_preview);
+        }
       }
       break;
     }
@@ -1835,6 +1851,7 @@ function handle(e) {
 
     case "file_changed":
       state.files.set(e.path, { bytes: e.bytes, diff: e.diff });
+      if (e.diff) showCode(`Diff: ${e.path}`, e.diff);
       break;
 
     case "verification":
