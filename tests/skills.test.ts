@@ -223,10 +223,11 @@ describe("system prompt wiring", () => {
     ]) {
       expect(names).toContain(expected);
     }
-    expect(skills).toHaveLength(352);
+    expect(skills).toHaveLength(353);
     for (const ecc of ["accessibility", "agent-eval", "api-design"]) {
       expect(names).toContain(ecc);
     }
+    expect(names).toContain("free-for-dev");
     expect(skills.find((s) => s.name === "website")).toEqual({
       name: "website",
       description:
