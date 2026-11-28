@@ -125,6 +125,27 @@ describe("UI proses run simpel (tidak penuh teks)", () => {
   });
 });
 
+describe("tampilan proses kayak Z.ai (lipat saat selesai)", () => {
+  it("finishThink melipat blok untuk semua status akhir, bukan cuma completed", () => {
+    expect(js).toMatch(
+      /function finishThink\(status, steps\) \{[\s\S]*?t\.block\.classList\.add\("collapsed"\)/,
+    );
+    expect(js).not.toMatch(
+      /if \(status === "completed"\) t\.block\.classList\.add\("collapsed"\)/,
+    );
+  });
+
+  it("header think bisa diketuk untuk buka-tutup (drawer tersembunyi saat lipat)", () => {
+    expect(js).toMatch(
+      /toggle\.addEventListener\("click", \(\) => \{[\s\S]*?block\.classList\.toggle\("collapsed"\)/,
+    );
+    expect(html).toContain('class="think-toggle"');
+    expect(css).toMatch(
+      /\.think-block\.collapsed \.think-drawer \{[^}]*display: none/,
+    );
+  });
+});
+
 describe("stop membebaskan UI yang macet", () => {
   it("stopRun mengenali run yang sudah hilang (404) dan mematikan busy", () => {
     expect(js).toMatch(

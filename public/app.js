@@ -1332,7 +1332,15 @@ function finishThink(status, steps) {
     };
     t.labelEl.textContent = labels[status] || "Selesai";
     t.block.classList.add(status === "error" ? "err" : "done");
-    if (status === "completed") t.block.classList.add("collapsed");
+    // Kayak Z.ai: begitu run berakhir (status apa pun — selesai,
+    // dihentikan, error, batas tercapai), lipat jadi satu baris
+    // ringkasan. Detail langkah + kode tetap ada, tinggal ketuk header
+    // untuk membuka; sebelumnya cuma status "completed" yang dilipat,
+    // jadi run yang putus di tengah membiarkan daftar langkah memenuhi
+    // layar selamanya.
+    t.block.classList.add("collapsed");
+    const toggle = t.block.querySelector(".think-toggle");
+    if (toggle) toggle.setAttribute("aria-expanded", "false");
   }
   state.lastThink = t.count === 0 ? null : t.block;
   state.think = null;
