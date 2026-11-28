@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   checkLimits,
+  defaultExec,
   maxVideoSeconds,
   parseCompositionsTable,
   executeRenderVideo,
@@ -41,6 +42,8 @@ interface Call {
 
 interface StubOpts {
   compositions?: string;
+  compositionsOk?: boolean;
+  compositionsOutput?: string;
   stillOk?: boolean;
   renderOk?: boolean;
   ffprobeJson?: string | null;
@@ -57,11 +60,13 @@ function makeStub(opts: StubOpts = {}) {
     calls.push({ file, args });
     if (file === "ffprobe") {
       if (opts.ffprobeMissing)
+        // Inilah yang benar-benar dihasilkan defaultExec saat binary tidak
+        // ada: output kosong + kode spawn (bukan teks "command not found").
         return {
           ok: false,
           killed: false,
-          code: 127,
-          output: "ffprobe: command not found (ENOENT)",
+          code: 1,
+          output: "[spawn error: ENOENT]",
         };
       return {
         ok: true,
@@ -75,13 +80,21 @@ function makeStub(opts: StubOpts = {}) {
           }),
       };
     }
-    if (args.includes("compositions"))
+    if (args.includes("compositions")) {
+      if (opts.compositionsOk === false)
+        return {
+          ok: false,
+          killed: false,
+          code: 1,
+          output: opts.compositionsOutput ?? "",
+        };
       return {
         ok: true,
         killed: false,
         code: 0,
         output: opts.compositions ?? TABLE_10S,
       };
+    }
     if (args.includes("still")) {
       if (opts.stillOk === false)
         return {
@@ -368,6 +381,51 @@ describe("render_video tool (stubbed exec)", () => {
     );
     expect(r.ok).toBe(true);
     expect(r.summary).toMatch(/ffprobe tidak tersedia/);
+  });
+
+  it("compositions gagal dengan output kosong memberi petunjuk Root.tsx", async () => {
+    // Regresi 28 Nov 2026 (Scene6): `npx remotion compositions` gagal
+    // dengan output kosong — agent tidak bisa melihat penyebabnya dan
+    // menebak-nebak isi Root.tsx. Pesan error harus menyebut kemungkinan
+    // 0 komposisi terdaftar.
+    const ws = await tempWorkspace();
+    await makeProject(ws);
+    const { exec } = makeStub({ compositionsOk: false, compositionsOutput: "" });
+    await expect(
+      executeRenderVideo(
+        { projectDir: "video", compositionId: "Intro", output: "out/video.mp4" },
+        { workspace: ws },
+        exec,
+      ),
+    ).rejects.toThrow(/tidak mendaftarkan <Composition> sama sekali/);
+  });
+
+  it("komposisi tidak ditemukan saat tidak ada komposisi sama sekali", async () => {
+    const ws = await tempWorkspace();
+    await makeProject(ws);
+    const { exec } = makeStub({ compositions: "\n(tidak ada komposisi)\n" });
+    await expect(
+      executeRenderVideo(
+        { projectDir: "video", compositionId: "Intro", output: "out/video.mp4" },
+        { workspace: ws },
+        exec,
+      ),
+    ).rejects.toThrow(/tidak ada komposisi sama sekali/);
+  });
+});
+
+describe("defaultExec (spawn error)", () => {
+  it("binary yang tidak ada terlihat di output sebagai spawn error", async () => {
+    // Regresi 28 Nov 2026: execFile gagal spawn menghasilkan output kosong,
+    // sehingga probeMp4 tidak bisa mengenali ffprobe yang hilang dan salah
+    // melaporkannya sebagai "ffprobe gagal memeriksa ...: " tanpa pesan.
+    const ws = await tempWorkspace();
+    const r = await defaultExec("definitely-not-a-binary-xyz", [], {
+      cwd: ws,
+      timeout: 5000,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.output).toMatch(/spawn error: ENOENT/);
   });
 });
 

@@ -105,7 +105,8 @@ type ExecFn = (
   opts: { cwd: string; timeout: number; signal?: AbortSignal },
 ) => Promise<ExecResult>;
 
-function defaultExec(
+/** Diekspor untuk tes: spawn binary yang tidak ada harus terlihat di output. */
+export function defaultExec(
   file: string,
   args: string[],
   opts: { cwd: string; timeout: number; signal?: AbortSignal },
@@ -125,7 +126,17 @@ function defaultExec(
       (error, stdout, stderr) => {
         const code =
           typeof error?.code === "number" ? error.code : error ? 1 : 0;
-        const output = [stdout, stderr ? `[stderr]\n${stderr}` : ""]
+        // Spawn gagal (mis. binary tidak ada: ENOENT) tidak menghasilkan
+        // stdout/stderr sama sekali — tanpa baris ini, pemanggil tidak bisa
+        // membedakan "binary tidak ada" dari "binary jalan tapi error tanpa
+        // pesan" (bug 28 Nov 2026: ffprobe hilang di VPS dilaporkan sebagai
+        // "ffprobe gagal memeriksa ...: " dengan pesan kosong, padahal
+        // render-nya sudah berhasil).
+        const spawnError =
+          error && typeof error.code === "string"
+            ? `[spawn error: ${error.code}]`
+            : "";
+        const output = [stdout, stderr ? `[stderr]\n${stderr}` : "", spawnError]
           .filter(Boolean)
           .join("\n");
         resolve({ ok: !error, killed: Boolean(error?.killed), code, output });
@@ -192,7 +203,10 @@ async function probeMp4(
   if (!r.ok) {
     // ffprobe missing (exit 127 / ENOENT) is not fatal: the caller falls back
     // to a size check. A real ffprobe error on an existing file is fatal.
-    if (/ENOENT|not found|127/.test(r.output)) return null;
+    // "spawn error" menandakan binary-nya gagal dijalankan sama sekali
+    // (mis. tidak ada / tidak bisa dieksekusi) — perlakukan sama seperti
+    // tidak ada, karena defaultExec menaruh kode spawn di output.
+    if (/ENOENT|not found|127|spawn error/.test(r.output)) return null;
     throw new AgentError(
       "tool_failed",
       `ffprobe gagal memeriksa ${abs}: ${tailLines(r.output, 5)}`,
@@ -272,7 +286,10 @@ export async function executeRenderVideo(
   if (!comps.ok)
     throw new AgentError(
       "tool_failed",
-      `npx remotion compositions gagal (exit ${comps.code}):\n${tailLines(comps.output, 10)}`,
+      `npx remotion compositions gagal (exit ${comps.code}):\n${tailLines(comps.output, 10)}` +
+        (comps.output.trim() === ""
+          ? "\nOutput kosong — kemungkinan src/Root.tsx tidak mendaftarkan <Composition> sama sekali (Remotion menemukan 0 komposisi) atau bundle gagal sebelum mencetak error. Jalankan `npx remotion compositions` di terminal untuk melihat error aslinya; pastikan RemotionRoot me-render <Composition id=\"...\" component={...} ... />."
+          : ""),
       true,
     );
   const found = parseCompositionsTable(comps.output).find(
@@ -285,7 +302,9 @@ export async function executeRenderVideo(
     throw new AgentError(
       "tool_failed",
       `komposisi "${a.compositionId}" tidak ditemukan` +
-        (ids ? ` (yang ada: ${ids})` : "") +
+        (ids
+          ? ` (yang ada: ${ids})`
+          : " — tidak ada komposisi sama sekali yang terdaftar di src/Root.tsx") +
         `. Periksa id di src/Root.tsx.`,
       true,
     );
