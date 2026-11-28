@@ -191,7 +191,10 @@ describe("read_skill tool", () => {
 describe("system prompt wiring", () => {
   it("lists the real website and remotion skills and nothing else is leaked", async () => {
     const skills = await listSkills(REPO_SKILLS_DIR);
-    expect(skills.map((s) => s.name)).toEqual([
+    const names = skills.map((s) => s.name);
+    // 25 skill bawaan tetap ada, plus 327 skill ECC (brand-voice ECC di-skip:
+    // yang dipakai tetap brand-voice Rizqi).
+    for (const expected of [
       "brand-voice",
       "bug-bounty-reporting",
       "bug-bounty-scope",
@@ -217,7 +220,13 @@ describe("system prompt wiring", () => {
       "web3-triage-report",
       "website",
       "website-qa",
-    ]);
+    ]) {
+      expect(names).toContain(expected);
+    }
+    expect(skills).toHaveLength(352);
+    for (const ecc of ["accessibility", "agent-eval", "api-design"]) {
+      expect(names).toContain(ecc);
+    }
     expect(skills.find((s) => s.name === "website")).toEqual({
       name: "website",
       description:
