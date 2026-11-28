@@ -2007,7 +2007,18 @@ async function answer(decision) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ approval_id: approvalId, decision }),
     });
-    if (!r.ok) toast("Jawaban tidak terkirim. Mungkin sudah kedaluwarsa.");
+    if (!r.ok) {
+      // 404 bisa berarti run sudah mati (restart) ATAU persetujuan sudah
+      // dijawab di tempat lain — bedakan dengan probe: cuma run mati yang
+      // dibersihkan (lepas dari daftar run + tutup blok think), supaya
+      // lembar basi tidak ditawarkan lagi; run hidup dibiarkan jalan.
+      const alive = await probeRunAlive(runId);
+      if (alive === "dead") {
+        untrackRun(runId);
+        if (state.think) finishThink("stopped", state.think.count);
+      }
+      toast("Jawaban tidak terkirim. Mungkin sudah kedaluwarsa.");
+    }
   } catch {
     toast("Gagal menghubungi server.");
   }
@@ -2734,24 +2745,35 @@ async function restoreSession(sessionId) {
     // mengganggu. Simpan sebagai izin tertunda: label bar proses
     // menunjukkan "Menunggu izin", ketuk label untuk membuka lembarnya.
     // Run tetap menunggu jawaban; tidak ada yang dijawab diam-diam.
+    // TAPI pastikan dulu run-nya benar-benar masih hidup di server:
+    // run yang mati karena server restart menyisakan log dengan
+    // approval_requested tanpa approval_resolved — persetujuannya tidak
+    // bisa dijawab lagi (POST → 404), dan tanpa probe ini UI akan
+    // menawarkannya lagi di tiap kunjungan (bug 28 Nov 2026).
     if (liveRun) {
-      const evs = liveRun.events;
-      const req = [...evs]
-        .reverse()
-        .find((e) => e.type === "approval_requested");
-      const resolved =
-        req &&
-        evs.some(
-          (e) =>
-            e.type === "approval_resolved" &&
-            e.approval_id === req.approval_id,
-        );
-      if (req && !resolved) {
-        state.pendingApproval = { req, runId: liveRun.run_id };
-        if (state.think)
-          state.think.labelEl.textContent =
-            "Menunggu izin · ketuk untuk menjawab";
-        toast("Run ini menunggu izin — ketuk bar proses untuk menjawab.");
+      const alive = await probeRunAlive(liveRun.run_id);
+      if (alive === "dead") {
+        untrackRun(liveRun.run_id);
+        if (state.think) finishThink("stopped", state.think.count);
+      } else {
+        const evs = liveRun.events;
+        const req = [...evs]
+          .reverse()
+          .find((e) => e.type === "approval_requested");
+        const resolved =
+          req &&
+          evs.some(
+            (e) =>
+              e.type === "approval_resolved" &&
+              e.approval_id === req.approval_id,
+          );
+        if (req && !resolved) {
+          state.pendingApproval = { req, runId: liveRun.run_id };
+          if (state.think)
+            state.think.labelEl.textContent =
+              "Menunggu izin · ketuk untuk menjawab";
+          toast("Run ini menunggu izin — ketuk bar proses untuk menjawab.");
+        }
       }
     }
   }
