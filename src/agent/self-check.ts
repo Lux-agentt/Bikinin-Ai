@@ -13,8 +13,11 @@ import { classifyCommand } from "../safety/commands.js";
 import { resolveInWorkspace } from "../safety/paths.js";
 import { safeEnv } from "../tools/run-command.js";
 
-/** Max fix rounds the loop gives the model after a failed self-check. */
-export const SELF_CHECK_MAX_FIX_ROUNDS = 2;
+/** Max fix rounds the loop gives the model after a failed self-check.
+ * 1 putaran saja (dulu 2): putaran kedua jarang memperbaiki apa pun tapi
+ * selalu menambah 10-40 detik — model gratis lambat, jadi tiap putaran
+ * perbaikan terasa (aturan user 2026-11-28: kerjaan harus to the point). */
+export const SELF_CHECK_MAX_FIX_ROUNDS = 1;
 /** One check command gets at most 60 detik; the run's own budget still applies. */
 export const SELF_CHECK_TIMEOUT_MS = 60_000;
 const MAX_FILE_BYTES = 500_000;

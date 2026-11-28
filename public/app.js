@@ -2366,7 +2366,10 @@ async function reattachRun(sessionId, runId) {
 /** Saat halaman dimuat: bila ada run yang masih jalan di server (mis.
  *  pengguna refresh selagi agent bekerja), kembali ke chat itu dan
  *  sambung lagi — jangan biarkan pengguna mendarat di layar awal dengan
- *  kesan run-nya berhenti. */
+ *  kesan run-nya berhenti. Pindai daftar sesi berurutan (bukan cuma yang
+ *  terbaru): pengguna sering pindah chat, jadi run yang masih jalan bisa
+ *  ada di sesi yang lebih lama — dulu cuma list[0] yang dicek, dan refresh
+ *  dari chat lain membuat run itu "hilang" dari tampilan. */
 async function reattachLiveRun() {
   let list;
   try {
@@ -2375,20 +2378,26 @@ async function reattachLiveRun() {
     return;
   }
   if (!Array.isArray(list) || list.length === 0) return;
-  const newest = list[0];
-  if (!newest || !newest.session_id) return;
-  let detail;
-  try {
-    detail = await fetchJson(
-      `/api/sessions/${encodeURIComponent(newest.session_id)}`,
+  // Maks 5 detail: cukup untuk menemukan run yang masih jalan tanpa
+  // membanjiri server dengan fetch saat daftar riwayat panjang.
+  for (const sess of list.slice(0, 5)) {
+    if (!sess || !sess.session_id) continue;
+    let detail;
+    try {
+      detail = await fetchJson(
+        `/api/sessions/${encodeURIComponent(sess.session_id)}`,
+      );
+    } catch {
+      continue;
+    }
+    const unfinished = (detail.runs ?? []).filter(
+      (r) => !r.events.some((e) => e.type === "run_finished"),
     );
-  } catch {
-    return;
+    if (unfinished.length > 0) {
+      await restoreSession(sess.session_id);
+      return;
+    }
   }
-  const unfinished = (detail.runs ?? []).filter(
-    (r) => !r.events.some((e) => e.type === "run_finished"),
-  );
-  if (unfinished.length > 0) await restoreSession(newest.session_id);
 }
 
 async function start(message, opts = {}) {

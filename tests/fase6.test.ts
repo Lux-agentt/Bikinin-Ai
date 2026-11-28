@@ -319,6 +319,27 @@ describe("Fase 6 wiring", () => {
     );
   });
 
+  it("self-check gagal dua kali: berhenti setelah 1 putaran perbaikan (bukan 2)", async () => {
+    // To-the-point (aturan user 2026-11-28): putaran perbaikan kedua
+    // jarang memperbaiki apa pun tapi selalu menambah 10-40 detik.
+    const { events, result } = await run([
+      withCalls(
+        planCall("t0"),
+        call("t1", "write_file", { path: "a.txt", content: "TODO: isi\n" }),
+      ),
+      finalText("Selesai."),
+      withCalls(
+        call("t2", "write_file", { path: "a.txt", content: "TODO: tetap\n" }),
+      ),
+      finalText("Sudah diperbaiki."),
+    ]);
+    expect(result.status).toBe("completed");
+    const v = ofType(events, "verification");
+    expect(v.map((e) => e.outcome)).toEqual(["fail", "fail"]);
+    expect(v[1].fixes).toBe(1);
+    expect(result.summary).toContain("1 putaran perbaikan");
+  });
+
   it("plan mode allow: approval first, then the file is written", async () => {
     const { workspace, events, result } = await run(
       [

@@ -414,19 +414,24 @@ describe("web server", () => {
     // Tunggu sampai write_file benar-benar selesai (file ada di disk) —
     // baru run-nya parkir di gate (panggilan chat ke-3), jadi urutan
     // panggilan LLM deterministik untuk asersi seen[3] di bawah.
-    await waitFor(() =>
-      access(join(workspace, "index.html"))
-        .then(() => true)
-        .catch(() => false),
+    // Timeout longgar (8 dtk): di bawah beban suite penuh, VM lambat.
+    await waitFor(
+      () =>
+        access(join(workspace, "index.html"))
+          .then(() => true)
+          .catch(() => false),
+      8000,
     );
     expect((await post(`${url}/api/runs/${first.run_id}/stop`, {})).status).toBe(
       202,
     );
     release();
-    await waitFor(() =>
-      rec.events.some(
-        (e) => e.type === "run_finished" && e.status === "stopped",
-      ),
+    await waitFor(
+      () =>
+        rec.events.some(
+          (e) => e.type === "run_finished" && e.status === "stopped",
+        ),
+      8000,
     );
     const resumed = await post(`${url}/api/runs/${first.run_id}/resume`, {});
     expect(resumed.status).toBe(201);

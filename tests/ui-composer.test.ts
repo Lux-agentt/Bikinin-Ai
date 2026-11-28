@@ -17,6 +17,10 @@ const server = readFileSync(
   new URL("../src/server/http.ts", import.meta.url),
   "utf8",
 );
+const prompt = readFileSync(
+  new URL("../prompts/system-prompt.md", import.meta.url),
+  "utf8",
+);
 
 describe("composer buttons (HP: target sentuh besar)", () => {
   it("tombol aksi 40px, tombol kirim 44px", () => {
@@ -211,6 +215,39 @@ describe("lanjutkan run yang berhenti (bukan mulai dari awal)", () => {
   });
 });
 
+describe("refresh tidak membuat run hilang (pindai semua sesi)", () => {
+  it("reattachLiveRun mencari run yang belum selesai di semua sesi, bukan cuma yang terbaru", () => {
+    expect(js).toMatch(
+      /for \(const sess of list\.slice\(0, 5\)\)[\s\S]*?unfinished\.length > 0[\s\S]*?await restoreSession\(sess\.session_id\)/,
+    );
+  });
+});
+
+describe("prompt to-the-point (agent cepat, tidak bertele-tele)", () => {
+  it("rencana maks 3 langkah dan hanya diperbarui kalau berubah", () => {
+    expect(prompt).toContain("maks 3 langkah");
+    expect(prompt).toContain("Perbarui rencana hanya kalau rencana berubah");
+  });
+
+  it("tool call independen digabung dalam satu jawaban", () => {
+    expect(prompt).toContain(
+      "gabungkan beberapa tool call independen dalam SATU jawaban",
+    );
+  });
+
+  it("tugas website: baca skill paling relevan dulu, bukan semuanya", () => {
+    expect(prompt).toContain("baca skill yang paling relevan dulu");
+    expect(prompt).toContain("jangan baca semuanya di awal");
+  });
+
+  it("file terpotong: baca dengan max_lines lebih besar, jangan baca ulang yang sama", () => {
+    expect(prompt).toContain("max_lines` lebih besar (maks 2000)");
+    expect(prompt).toContain(
+      "jangan baca ulang file yang sama dengan parameter yang sama",
+    );
+  });
+});
+
 describe("tab Eval di folder sheet", () => {
   it("markup: tombol tab + body Eval dengan select provider, daftar tugas, tombol jalan", () => {
     expect(html).toContain('data-ftab="evals"');
@@ -282,15 +319,19 @@ describe("nama + logo luxagent", () => {
     expect(prompt).not.toContain("Bikinin AI");
   });
 
-  it("tugas website wajib baca semua skill website dulu", () => {
+  it("tugas website: baca skill paling relevan dulu, bukan semuanya", () => {
     const prompt = readFileSync(
       new URL("../prompts/system-prompt.md", import.meta.url),
       "utf8",
     );
+    // Dulu (push 48): wajib baca SEMUA skill website — lambat, tiap
+    // read_skill menambah langkah. Sekarang (push 53, to-the-point): baca
+    // yang paling relevan dulu, sisanya hanya kalau tugasnya butuh.
     expect(prompt).toContain(
-      "Khusus tugas website: cari SEMUA skill yang berkaitan dengan website",
+      "Khusus tugas website: baca skill yang paling relevan dulu",
     );
-    expect(prompt).toContain("baca semuanya dengan `read_skill` dulu");
+    expect(prompt).toContain("jangan baca semuanya di awal");
+    expect(prompt).not.toContain("cari SEMUA skill yang berkaitan");
   });
 
   it("pratinjau pakai tool preview, bukan server manual", () => {
@@ -505,7 +546,10 @@ describe("pindah chat selagi run jalan", () => {
     expect(js).toContain("async function reattachLiveRun() {");
     expect(js).toContain("function probeRunAlive(runId) {");
     expect(js).toContain("void reattachLiveRun();");
-    expect(js).toContain("await restoreSession(newest.session_id);");
+    // Dulu cuma sesi terbaru yang dicek (list[0]); sekarang pemindaian
+    // berurutan menemukan run di sesi lama juga (push 53).
+    expect(js).toContain("await restoreSession(sess.session_id);");
+    expect(js).not.toContain("await restoreSession(newest.session_id);");
   });
 
   it("handle() memilah kejadian run latar berdasarkan run_id", () => {

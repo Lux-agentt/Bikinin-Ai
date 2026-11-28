@@ -196,7 +196,14 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
     text: string;
     status: "pending" | "doing" | "done";
   }> = [];
-  // read_file cache: relative path -> mtime+size at read time + step.
+  // read_file cache: "rel:max_lines" -> mtime+size at read time + step.
+  // Kuncinya MEMAKAI max_lines: read_file default cuma 400 baris, jadi
+  // baca ulang file panjang dengan max_lines lebih besar adalah baca yang
+  // BERBEDA (baris 401+ belum pernah terlihat) — dulu kuncinya cuma path,
+  // sehingga baca ulang itu kena cache dan model tidak pernah bisa melihat
+  // sisa file: ia mengulang baca yang sama berkali-kali tanpa hasil
+  // (live 2026-11-28: 49 perintah, 475 dtk, Scene6.tsx dibaca ulang terus
+  // untuk cari durasi di akhir file).
   const readCache = new Map<
     string,
     { mtimeMs: number; size: number; step: number }
@@ -436,11 +443,19 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
     // Fase 5: jangan baca ulang file yang tidak berubah di run yang sama.
     // Isinya sudah ada di riwayat percakapan, jadi kembalikan catatan singkat
     // (hemat token) alih-alih isi file yang sama untuk kedua kalinya.
+    // Kunci cache memakai max_lines: baca dengan jendela lebih besar bukan
+    // baca yang sama (lihat komentar di deklarasi readCache).
     if (tool.name === "read_file" && typeof argPath === "string") {
       try {
         const { abs, rel } = await resolveInWorkspace(d.workspace, argPath);
         const st = await stat(abs);
-        const hit = readCache.get(rel);
+        const ml = (parsed.publicArgs as { max_lines?: unknown }).max_lines;
+        const maxLines =
+          typeof ml === "number" && Number.isFinite(ml)
+            ? Math.floor(ml)
+            : 400;
+        const cacheKey = `${rel}:${maxLines}`;
+        const hit = readCache.get(cacheKey);
         if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
           emitFinished(
             callId,
@@ -451,7 +466,7 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
           );
           return {
             id: call.id,
-            content: `OK (cache): ${rel} tidak berubah sejak dibaca di langkah ${hit.step} — isinya sudah ada di riwayat percakapan di atas, pakai itu.`,
+            content: `OK (cache): ${rel} tidak berubah sejak dibaca di langkah ${hit.step} — isinya sudah ada di riwayat percakapan di atas, pakai itu. Kalau butuh baris di luar yang sudah dibaca (read_file maks 400 baris), baca lagi dengan max_lines lebih besar (maks 2000) atau grep bagiannya — jangan baca ulang dengan parameter yang sama.`,
             failed: false,
             key,
           };
@@ -527,7 +542,13 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
           try {
             const { abs, rel } = await resolveInWorkspace(d.workspace, argPath);
             const st = await stat(abs);
-            readCache.set(rel, {
+            const ml = (parsed.publicArgs as { max_lines?: unknown })
+              .max_lines;
+            const maxLines =
+              typeof ml === "number" && Number.isFinite(ml)
+                ? Math.floor(ml)
+                : 400;
+            readCache.set(`${rel}:${maxLines}`, {
               mtimeMs: st.mtimeMs,
               size: st.size,
               step: budget.steps,
@@ -538,7 +559,9 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         } else if (tool.name === "write_file" || tool.name === "edit_file") {
           try {
             const { rel } = await resolveInWorkspace(d.workspace, argPath);
-            readCache.delete(rel);
+            // Hapus SEMUA jendela baca file itu (kunci "rel:max_lines").
+            for (const k of [...readCache.keys()])
+              if (k.startsWith(`${rel}:`)) readCache.delete(k);
           } catch {
             // abaikan
           }

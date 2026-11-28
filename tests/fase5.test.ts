@@ -273,6 +273,48 @@ describe("read cache", () => {
     expect(reads[1].content).not.toContain("(cache)");
     expect(reads[1].content).toContain("halo");
   });
+
+  it("baca ulang file panjang dengan max_lines lebih besar bukan dari cache", async () => {
+    // Regresi live 2026-11-28: Scene6.tsx dibaca ulang berkali-kali
+    // (49 perintah, 475 dtk) untuk cari durasi di akhir file — read_file
+    // default cuma 400 baris, dan cache lama mengunci di path saja,
+    // sehingga baca ulang itu selalu dijawab catatan cache tanpa pernah
+    // memperlihatkan baris 401+.
+    const workspace = await tempWorkspace();
+    const lines = Array.from(
+      { length: 500 },
+      (_, i) => `baris ke-${i + 1}`,
+    );
+    lines[449] = "BARIS-450-MARKER durasi";
+    await writeFile(join(workspace, "panjang.tsx"), lines.join("\n"));
+    const { result } = await run(
+      [
+        withCalls(
+          call("c1", "update_plan", {
+            items: [{ text: "Baca file panjang", status: "doing" }],
+          }),
+        ),
+        withCalls(call("c2", "read_file", { path: "panjang.tsx" })),
+        withCalls(
+          call("c3", "read_file", { path: "panjang.tsx", max_lines: 2000 }),
+        ),
+        finalText("selesai"),
+      ],
+      {},
+      workspace,
+    );
+    expect(result.status).toBe("completed");
+    const toolMsgs = result.transcript.filter((m) => m.role === "tool");
+    const reads = toolMsgs.filter(
+      (m) =>
+        typeof m.content === "string" &&
+        (m.content.includes("baris)") || m.content.includes("OK (cache)")),
+    );
+    expect(reads).toHaveLength(2);
+    expect(reads[0].content).not.toContain("BARIS-450-MARKER");
+    expect(reads[1].content).not.toContain("(cache)");
+    expect(reads[1].content).toContain("BARIS-450-MARKER");
+  });
 });
 
 describe("compaction dalam run", () => {
