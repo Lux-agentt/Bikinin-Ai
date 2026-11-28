@@ -17,7 +17,7 @@ import type { RegisteredTool } from "../tools/types.js";
 export const SUBAGENT_MAX_STEPS = 8;
 export const SUBAGENT_MAX_COST_USD = 0.05;
 export const SUBAGENT_SUMMARY_MAX_CHARS = 2000;
-export const MAX_CONCURRENT_SUBAGENTS = 2;
+export const MAX_CONCURRENT_SUBAGENTS = 5;
 export const QUOTA_NOTE =
   "Subagent memakai kuota provider yang sama dengan run utama (OpenRouter gratis: 50 request/hari per akun).";
 

@@ -10,7 +10,7 @@ import { defineTool } from "./types.js";
 export const delegateTool = defineTool({
   name: "delegate",
   description:
-    "Delegasikan SATU tugas riset spesifik ke subagent (baca file, baca skill, cari di internet) dan terima ringkasannya. Subagent tidak boleh menulis file. Pakai hanya bila riset paralel benar-benar membantu; JANGAN untuk tugas sepele yang bisa dikerjakan langsung — subagent memakai kuota provider yang sama (OpenRouter gratis: 50 request/hari per akun).",
+    "Delegasikan SATU tugas spesifik ke subagent (baca file, baca skill, cari di internet, cek error) dan terima ringkasannya. Subagent tidak boleh menulis file. Bagi tugas ke beberapa subagent sekaligus dalam satu jawaban — mis. satu baca kode, satu cek error, satu riset — mereka jalan bareng (maks 5). Pakai bila bagi tugas benar-benar membantu; JANGAN untuk tugas sepele yang bisa dikerjakan langsung — subagent memakai kuota/biaya provider yang sama.",
   parameters: {
     type: "object",
     properties: {
@@ -28,7 +28,10 @@ export const delegateTool = defineTool({
     required: ["task"],
     additionalProperties: false,
   },
-  readOnly: false,
+  // readOnly: true — subagent HANYA punya tool baca (list_dir, read_file,
+  // read_skill, web_search), jadi beberapa delegate dalam satu batch aman
+  // jalan paralel; yang menulis file tetap agent utama.
+  readOnly: true,
   schema: z.object({
     task: z.string().min(1).max(2000),
     context: z.string().max(2000).optional(),

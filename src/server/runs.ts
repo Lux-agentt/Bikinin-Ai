@@ -146,10 +146,11 @@ export class NotConfiguredError extends Error {}
 /** An attachment_id that is missing, outside the workspace, or secret. */
 export class BadAttachmentError extends Error {}
 
-/** Batas run yang jalan bareng: satu per sesi, maks 3 sekaligus. VPS cuma
- *  1 vCPU — run kebanyakan nunggu LLM (jaringan), jadi 3 masih aman; lebih
- *  dari itu antrean client yang menahan (bukan server yang menolak diam-diam). */
-export const MAX_CONCURRENT_RUNS = 3;
+/** Batas run yang jalan bareng: satu per sesi, maks 5 sekaligus. VPS cuma
+ *  1 vCPU — run kebanyakan nunggu LLM (jaringan), jadi 5 masih aman; lebih
+ *  dari itu antrean client yang menahan (bukan server yang menolak diam-diam).
+ *  (aturan user 2026-11-28: kerjaan harus paralel, minimal 5.) */
+export const MAX_CONCURRENT_RUNS = 5;
 
 export class RunManager {
   private readonly runs = new Map<string, RunRecord>();

@@ -14,7 +14,7 @@ const heroEl = $("#hero");
 const isCoarsePointer = matchMedia("(pointer: coarse)").matches;
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const CIRC = 97.39; // 2 * PI * 15.5, matches the ring in app.css
-const MAX_PARALLEL = 3; // sama dengan MAX_CONCURRENT_RUNS server — run ke-4 masuk antrean
+const MAX_PARALLEL = 5; // sama dengan MAX_CONCURRENT_RUNS server — run ke-6 masuk antrean
 
 const state = {
   cfg: null,

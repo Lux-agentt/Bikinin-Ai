@@ -294,7 +294,20 @@ describe("web server", () => {
       attachment_ids: [],
       effort: "sedang",
     });
-    expect(new Set([a.session_id, b.session_id, c.session_id]).size).toBe(3);
+    const d = manager.start({
+      message: "empat",
+      attachment_ids: [],
+      effort: "sedang",
+    });
+    const e = manager.start({
+      message: "lima",
+      attachment_ids: [],
+      effort: "sedang",
+    });
+    expect(
+      new Set([a.session_id, b.session_id, c.session_id, d.session_id, e.session_id])
+        .size,
+    ).toBe(5);
     expect(() =>
       manager.start({
         message: "lagi",
@@ -303,12 +316,13 @@ describe("web server", () => {
         effort: "sedang",
       }),
     ).toThrow(BusyError);
+    // Run ke-6 (sesi baru) ditolak — batas 5 (aturan user 2026-11-28).
     expect(() =>
-      manager.start({ message: "empat", attachment_ids: [], effort: "sedang" }),
+      manager.start({ message: "enam", attachment_ids: [], effort: "sedang" }),
     ).toThrow(BusyError);
-    // Biarkan ketiganya selesai sendiri, lalu pastikan tidak ada yang nyangkut.
+    // Biarkan kelimanya selesai sendiri, lalu pastikan tidak ada yang nyangkut.
     await new Promise((r) => setTimeout(r, 500));
-    for (const runId of [a.run_id, b.run_id, c.run_id]) {
+    for (const runId of [a.run_id, b.run_id, c.run_id, d.run_id, e.run_id]) {
       expect(manager.get(runId)?.finished).toBe(true);
     }
   });

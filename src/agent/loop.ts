@@ -702,26 +702,45 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
     const rest = jobs.filter((j) => j.tool.name !== "request_plan_approval");
     const orderedJobs = [...planFirst, ...rest];
 
-    // Read-only tools run in parallel; anything that mutates runs in order.
-    if (jobs.every((j) => j.tool.readOnly)) {
-      const outs = await Promise.all(orderedJobs.map(runJob));
-      for (const o of outs) results.set(o.id, o);
-    } else {
-      for (const job of orderedJobs) {
-        // Stop ditekan selagi satu tool jalan: jangan mulai tool
-        // berikutnya dalam batch ini.
-        if (d.signal?.aborted) {
-          results.set(job.call.id, {
-            id: job.call.id,
-            content: "Dihentikan pengguna.",
-            failed: true,
-            key: `${job.tool.name}:${job.call.function.arguments}`,
-          });
-          continue;
-        }
-        results.set(job.call.id, await runJob(job));
+    // Batch campuran: tool baca yang BERURUTAN jalan paralel (Promise.all),
+    // tool pengubah file tetap satu-per-satu sesuai urutan — jadi baca
+    // sesudah tulis selalu melihat hasil tulisnya. Dulu: satu tool tulis
+    // dalam batch membuat SEMUA tool (termasuk baca) jalan berurutan,
+    // sehingga kerjaan terasa satu-per-satu dan lambat (aturan user
+    // 2026-11-28: kerjaan harus paralel supaya tidak lemot).
+    const stopped = (job: Job): ToolOutput => ({
+      id: job.call.id,
+      content: "Dihentikan pengguna.",
+      failed: true,
+      key: `${job.tool.name}:${job.call.function.arguments}`,
+    });
+    let readGroup: Job[] = [];
+    const flushReads = async () => {
+      if (readGroup.length === 0) return;
+      const group = readGroup;
+      readGroup = [];
+      if (d.signal?.aborted) {
+        for (const job of group) results.set(job.call.id, stopped(job));
+        return;
       }
+      const outs = await Promise.all(group.map(runJob));
+      for (const o of outs) results.set(o.id, o);
+    };
+    for (const job of orderedJobs) {
+      if (job.tool.readOnly) {
+        readGroup.push(job);
+        continue;
+      }
+      await flushReads();
+      // Stop ditekan selagi satu tool jalan: jangan mulai tool
+      // berikutnya dalam batch ini.
+      if (d.signal?.aborted) {
+        results.set(job.call.id, stopped(job));
+        continue;
+      }
+      results.set(job.call.id, await runJob(job));
     }
+    await flushReads();
 
     const outputs = calls.map(
       (c) =>

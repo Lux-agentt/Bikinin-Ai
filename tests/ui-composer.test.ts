@@ -246,6 +246,12 @@ describe("prompt to-the-point (agent cepat, tidak bertele-tele)", () => {
       "jangan baca ulang file yang sama dengan parameter yang sama",
     );
   });
+
+  it("bagi tugas ke subagent: satu baca, satu cek error, jalan bareng maks 5", () => {
+    expect(prompt).toContain("Bagi tugas ke subagent (`delegate`)");
+    expect(prompt).toContain("satu cek error");
+    expect(prompt).toContain("jalan bareng (maks 5)");
+  });
 });
 
 describe("tab Eval di folder sheet", () => {
@@ -534,7 +540,7 @@ describe("pindah chat selagi run jalan", () => {
   it("run bareng: state run/source per sesi, cap 3, antrean cuma saat penuh", () => {
     expect(js).toContain("runs: new Map(),");
     expect(js).toContain("sources: new Map(),");
-    expect(js).toContain("const MAX_PARALLEL = 3;");
+    expect(js).toContain("const MAX_PARALLEL = 5;");
     expect(js).toContain("function ownRunId() {");
     expect(js).toContain("function trackRun(sessionId, runId) {");
     expect(js).toContain("function untrackRun(runId) {");

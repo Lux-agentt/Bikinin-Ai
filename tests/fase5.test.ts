@@ -317,6 +317,48 @@ describe("read cache", () => {
   });
 });
 
+describe("batch campuran: baca paralel, tulis berurutan", () => {
+  it("baca sesudah tulis melihat isi baru (urutan tetap dijaga)", async () => {
+    // Paralel (aturan user 2026-11-28): tool baca yang berurutan dalam
+    // satu batch jalan bareng, tool tulis tetap satu-per-satu. Tes ini
+    // menjaga urutannya: baca sesudah tulis HARUS melihat isi baru —
+    // kalau baca itu ikut paralel dengan tulisnya, isinya masih "lama".
+    const workspace = await tempWorkspace();
+    await writeFile(join(workspace, "a.txt"), "lama");
+    await writeFile(join(workspace, "b.txt"), "isi-b");
+    const { result } = await run(
+      [
+        withCalls(
+          call("c1", "update_plan", {
+            items: [{ text: "Baca, tulis, baca lagi", status: "doing" }],
+          }),
+        ),
+        withCalls(
+          call("c2", "read_file", { path: "a.txt" }),
+          call("c3", "read_file", { path: "b.txt" }),
+          call("c4", "write_file", { path: "a.txt", content: "baru" }),
+          call("c5", "read_file", { path: "a.txt" }),
+        ),
+        finalText("selesai"),
+      ],
+      {},
+      workspace,
+    );
+    expect(result.status).toBe("completed");
+    const toolMsgs = result.transcript.filter((m) => m.role === "tool");
+    const reads = toolMsgs.filter(
+      (m) =>
+        typeof m.content === "string" &&
+        (m.content.includes("baris)") || m.content.includes("OK (cache)")),
+    );
+    expect(reads).toHaveLength(3);
+    expect(reads[0].content).toContain("lama");
+    expect(reads[1].content).toContain("isi-b");
+    expect(reads[2].content).not.toContain("(cache)");
+    expect(reads[2].content).toContain("baru");
+  });
+});
+
 describe("compaction dalam run", () => {
   it("hasil tool lama dipotong saat konteks melewati batas", async () => {
     const workspace = await tempWorkspace();
@@ -426,7 +468,7 @@ describe("delegate / subagent", () => {
     expect(delegateMsg!.content).toContain("tidak bisa menulis");
   });
 
-  it("maks 2 subagent bersamaan; yang ketiga langsung ditolak (fail fast)", async () => {
+  it("maks 5 subagent bersamaan; yang keenam langsung ditolak (fail fast)", async () => {
     const workspace = await tempWorkspace();
     const events: AgentEvent[] = [];
     const emit = createEmitter("run_test", (e) => events.push(e));
@@ -461,20 +503,67 @@ describe("delegate / subagent", () => {
       }) as (d: AgentDeps) => Promise<import("../src/agent/loop.js").AgentResult>,
       charge: () => {},
     });
-    const p1 = runner("tugas 1");
-    const p2 = runner("tugas 2");
-    // Beri kesempatan dua runner pertama masuk ke gate.
+    const ps = [
+      runner("tugas 1"),
+      runner("tugas 2"),
+      runner("tugas 3"),
+      runner("tugas 4"),
+      runner("tugas 5"),
+    ];
+    // Beri kesempatan kelima runner masuk ke gate.
     await new Promise((r) => setTimeout(r, 10));
-    expect(activeSubagentCount()).toBe(2);
-    const third = await runner("tugas 3");
-    expect(third.status).toBe("error");
-    expect(third.summary).toMatch(/sibuk/);
+    expect(activeSubagentCount()).toBe(5);
+    const sixth = await runner("tugas 6");
+    expect(sixth.status).toBe("error");
+    expect(sixth.summary).toMatch(/sibuk/);
     release();
-    const [r1, r2] = await Promise.all([p1, p2]);
-    expect(r1.status).toBe("completed");
-    expect(r2.status).toBe("completed");
+    const rs = await Promise.all(ps);
+    for (const r of rs) expect(r.status).toBe("completed");
     expect(activeSubagentCount()).toBe(0);
     void events;
+  });
+
+  it("delegate read-only: beberapa delegate dalam satu batch jalan bareng", async () => {
+    // Subagent cuma punya tool baca, jadi delegate ditandai readOnly dan
+    // batch [delegate, delegate] dieksekusi paralel oleh loop (bukan
+    // satu-per-satu). Dua subagent berbagi antrean scripted yang sama:
+    // tiap subagent butuh 1 baca + 1 jawaban akhir, jadi skripnya 7
+    // respons (rencana + batch delegate + 2×(baca + akhir) + akhir utama)
+    // — urutan konsumsi antar-subagent boleh tertukar, keduanya tetap
+    // selesai karena tiap subagent cuma butuh 1 baca + 1 akhir.
+    expect(getTool("delegate")?.readOnly).toBe(true);
+    const workspace = await tempWorkspace();
+    await writeFile(join(workspace, "a.txt"), "isi-a");
+    await writeFile(join(workspace, "b.txt"), "isi-b");
+    const { result } = await run(
+      [
+        withCalls(
+          call("c1", "update_plan", {
+            items: [{ text: "Riset dua file bareng", status: "doing" }],
+          }),
+        ),
+        withCalls(
+          call("c2", "delegate", { task: "Baca a.txt dan ringkas" }),
+          call("c3", "delegate", { task: "Baca b.txt dan ringkas" }),
+        ),
+        withCalls(call("c4", "read_file", { path: "a.txt" })),
+        finalText("ringkas a"),
+        withCalls(call("c5", "read_file", { path: "b.txt" })),
+        finalText("ringkas b"),
+        finalText("selesai"),
+      ],
+      {},
+      workspace,
+    );
+    expect(result.status).toBe("completed");
+    const subs = result.transcript.filter(
+      (m) =>
+        m.role === "tool" &&
+        typeof m.content === "string" &&
+        m.content.includes("subagent:"),
+    );
+    expect(subs).toHaveLength(2);
+    for (const s of subs) expect(s.content).toContain("completed");
   });
 });
 
