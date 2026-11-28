@@ -1,11 +1,18 @@
-// Installs a skill into skills/<name>/SKILL.md from a GitHub link or
-// pasted text. The next run picks it up via the Fase 8 hot reload
-// (buildSystemPrompt re-lists skills before each run); no restart needed.
+// Installs a skill into skills/<kelompok>/<name>/SKILL.md (or
+// skills/<name>/SKILL.md when its frontmatter category is not one of the 5
+// known groups) from a GitHub link or pasted text. The next run picks it up
+// via the Fase 8 hot reload (buildSystemPrompt re-lists skills before each
+// run); no restart needed.
 // Only GitHub hosts are fetched — a skill file must come from a repo the
 // owner points at, never an arbitrary URL.
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { NAME_RE, parseFrontmatter, skillsDir } from "./loader.js";
+import {
+  CATEGORY_ORDER,
+  NAME_RE,
+  parseFrontmatter,
+  skillsDir,
+} from "./loader.js";
 
 /** A SKILL.md bigger than this is rejected (HTTP JSON bodies cap at 64 KB). */
 export const MAX_SKILL_BYTES = 64 * 1024;
@@ -94,13 +101,20 @@ export interface InstallSkillInput {
 /**
  * Validates and writes the skill. The folder name always comes from the
  * frontmatter `name` (which must match NAME_RE, so the join below cannot
- * escape the skills dir). Refuses when the skill already exists — remove
- * the old folder first if it is meant to be replaced.
+ * escape the skills dir). A skill whose frontmatter `category` is one of
+ * the 5 known groups lands in skills/<kelompok>/<name>/; anything else
+ * lands flat in skills/<name>/. Refuses when the skill already exists —
+ * remove the old folder first if it is meant to be replaced.
  */
 export async function installSkill(
   input: InstallSkillInput,
   dir: string = skillsDir(),
-): Promise<{ name: string; description: string; bytes: number }> {
+): Promise<{
+  name: string;
+  description: string;
+  bytes: number;
+  path: string;
+}> {
   const text = input.url
     ? await fetchSkillText(input.url)
     : (input.content ?? "");
@@ -113,11 +127,11 @@ export async function installSkill(
   if (text.length > MAX_SKILL_BYTES) {
     throw new InstallError(413, "file skill terlalu besar (maks 64 KB)");
   }
-  const { name, description } = parseFrontmatter(text);
+  const { name, description, category } = parseFrontmatter(text);
   if (!name || !description) {
     throw new InstallError(
       400,
-      "SKILL.md butuh frontmatter --- dengan name dan description — lihat skills/website/SKILL.md sebagai contoh",
+      "SKILL.md butuh frontmatter --- dengan name dan description — lihat skills/website/website/SKILL.md sebagai contoh",
     );
   }
   if (!NAME_RE.test(name)) {
@@ -132,7 +146,13 @@ export async function installSkill(
       `nama yang diminta "${input.name}" tidak cocok dengan frontmatter name "${name}"`,
     );
   }
-  const skillDir = join(dir, name);
+  const group = (CATEGORY_ORDER as readonly string[]).includes(category ?? "")
+    ? category!
+    : null;
+  const skillDir = group ? join(dir, group, name) : join(dir, name);
+  const relPath = group
+    ? `skills/${group}/${name}/SKILL.md`
+    : `skills/${name}/SKILL.md`;
   await mkdir(skillDir, { recursive: true });
   try {
     await writeFile(join(skillDir, "SKILL.md"), text, {
@@ -143,10 +163,15 @@ export async function installSkill(
     if ((err as NodeJS.ErrnoException).code === "EEXIST") {
       throw new InstallError(
         409,
-        `skill "${name}" sudah ada — hapus folder skills/${name} dulu lewat git kalau mau ganti`,
+        `skill "${name}" sudah ada — hapus folder ${relPath.replace("/SKILL.md", "")} dulu lewat git kalau mau ganti`,
       );
     }
     throw err;
   }
-  return { name, description, bytes: Buffer.byteLength(text, "utf8") };
+  return {
+    name,
+    description,
+    bytes: Buffer.byteLength(text, "utf8"),
+    path: relPath,
+  };
 }

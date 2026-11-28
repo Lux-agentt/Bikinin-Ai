@@ -9,7 +9,7 @@ import { defineTool, truncate } from "./types.js";
 export const readSkillTool = defineTool({
   name: "read_skill",
   description:
-    "Baca instruksi lengkap sebuah skill dari skills/<nama>/SKILL.md. Wajib dipanggil sebelum mengerjakan tugas yang cocok dengan deskripsi skill itu. Nama skill persis seperti di daftar skill (mis. website).",
+    "Baca instruksi lengkap sebuah skill dari skills/<kelompok>/<nama>/SKILL.md. Wajib dipanggil sebelum mengerjakan tugas yang cocok dengan deskripsi skill itu. Nama skill persis seperti di daftar skill (mis. website).",
   parameters: {
     type: "object",
     properties: {

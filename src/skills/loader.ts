@@ -2,11 +2,10 @@
 // Only name + description + category are exposed to the model; the full file
 // is read by the agent on demand via the read_skill tool. Returns [] when the
 // folder does not exist yet. A broken skill is skipped, never fatal.
-// Kategori (aturan user 28 Nov 2026): 5 kelompok — video, coding, website,
-// writing, bounty — ditulis di frontmatter tiap skill sebagai
-// `category: <slug>`; daftar prompt dikelompokkan per kelompok. 152 skill
-// tak terpakai dihapus atas persetujuan user (28 Nov 2026, v2: coding
-// disimpan, bounty kelompok sendiri); yang tersisa 201 skill.
+// Layout (28 Nov 2026, aturan user: skill dipindah ke folder per kelompok):
+// skills/<kelompok>/<nama>/SKILL.md — kelompok = video, coding, website,
+// writing, bounty. Flat skills/<nama>/SKILL.md still work (legacy + install
+// tanpa kategori dikenal); grouped wins when the same name exists twice.
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, resolve, sep } from "node:path";
@@ -83,30 +82,72 @@ function normalizeCategory(raw: string | undefined): string {
   return DEFAULT_CATEGORY;
 }
 
-export async function listSkills(dir: string): Promise<SkillInfo[]> {
+/** One discovered SKILL.md: its skill name, the file path, and its text
+ *  (read once here so listSkills/readSkill never read the file twice). */
+interface SkillFile {
+  name: string;
+  file: string;
+  text: string;
+}
+
+/**
+ * Discovers every SKILL.md under dir, flat (`skills/<nama>/SKILL.md`) or
+ * grouped (`skills/<kelompok>/<nama>/SKILL.md`). Grouped wins when the same
+ * name exists in both layouts (during the move both can briefly exist with
+ * identical content). Companion subdirs (references/, examples/, scripts/)
+ * never contain a SKILL.md, so they are skipped naturally.
+ */
+async function discoverSkillFiles(dir: string): Promise<SkillFile[]> {
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
   } catch {
     return [];
   }
-  const out: SkillInfo[] = [];
+  const found = new Map<string, SkillFile>();
+  const tryFile = async (folder: string, name: string): Promise<void> => {
+    if (!NAME_RE.test(name) || found.has(name)) return;
+    const file = join(folder, "SKILL.md");
+    try {
+      const text = await readFile(file, "utf8");
+      found.set(name, { name, file, text });
+    } catch {
+      // No SKILL.md here — not a skill folder.
+    }
+  };
+  // Grouped layout first, so it wins on a duplicate name.
   for (const e of entries) {
     if (!e.isDirectory()) continue;
+    let children;
     try {
-      const text = await readFile(join(dir, e.name, "SKILL.md"), "utf8");
-      const { name, description, category } = parseFrontmatter(text);
-      // The frontmatter name must match the folder name, so a skill name
-      // always resolves to exactly one directory (see readSkill).
-      if (name === e.name && description)
-        out.push({
-          name,
-          description,
-          category: normalizeCategory(category),
-        });
+      children = await readdir(join(dir, e.name), { withFileTypes: true });
     } catch {
-      // Skip unreadable skills; a broken skill must not break the list.
+      continue;
     }
+    for (const c of children) {
+      if (c.isDirectory()) await tryFile(join(dir, e.name, c.name), c.name);
+    }
+  }
+  // Flat layout (legacy + fresh installs without a known category).
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    await tryFile(join(dir, e.name), e.name);
+  }
+  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function listSkills(dir: string): Promise<SkillInfo[]> {
+  const out: SkillInfo[] = [];
+  for (const { name, text } of await discoverSkillFiles(dir)) {
+    const { name: fmName, description, category } = parseFrontmatter(text);
+    // The frontmatter name must match the folder name, so a skill name
+    // always resolves to exactly one directory (see readSkill).
+    if (fmName === name && description)
+      out.push({
+        name,
+        description,
+        category: normalizeCategory(category),
+      });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -162,7 +203,11 @@ export async function readSkill(dir: string, name: string): Promise<string> {
     );
   }
   const root = resolve(dir);
-  const abs = resolve(root, name, "SKILL.md");
+  const hit = (await discoverSkillFiles(dir)).find((f) => f.name === name);
+  if (!hit) {
+    throw new AgentError("tool_failed", `skill tidak ditemukan: ${name}`, true);
+  }
+  const abs = resolve(hit.file);
   if (!abs.startsWith(root + sep)) {
     throw new AgentError(
       "path_blocked",
@@ -170,13 +215,11 @@ export async function readSkill(dir: string, name: string): Promise<string> {
       true,
     );
   }
-  const known = await listSkills(dir);
-  if (!known.some((s) => s.name === name)) {
+  // Same rule as listSkills: frontmatter name must match the folder name,
+  // and a description is required — otherwise the skill does not exist.
+  const { name: fmName, description } = parseFrontmatter(hit.text);
+  if (fmName !== name || !description) {
     throw new AgentError("tool_failed", `skill tidak ditemukan: ${name}`, true);
   }
-  try {
-    return await readFile(abs, "utf8");
-  } catch {
-    throw new AgentError("tool_failed", `skill tidak bisa dibaca: ${name}`, true);
-  }
+  return hit.text;
 }

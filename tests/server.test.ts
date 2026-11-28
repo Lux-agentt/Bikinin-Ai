@@ -1347,6 +1347,7 @@ describe("web server", () => {
           name: "contoh-skill",
           description: "Skill contoh untuk tes.",
           bytes: Buffer.byteLength(good, "utf8"),
+          path: "skills/contoh-skill/SKILL.md",
         },
       });
       expect(

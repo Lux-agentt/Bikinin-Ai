@@ -70,10 +70,21 @@ describe("installSkill", () => {
       name: "contoh-skill",
       description: "Skill contoh untuk tes.",
       bytes: Buffer.byteLength(GOOD, "utf8"),
+      path: "skills/contoh-skill/SKILL.md",
     });
     expect(
       await readFile(join(dir, "contoh-skill", "SKILL.md"), "utf8"),
     ).toBe(GOOD);
+  });
+
+  it("installs a skill with a known group category into its group folder", async () => {
+    const grouped =
+      '---\nname: contoh-video\ndescription: Skill video contoh.\ncategory: video\n---\n\n# Contoh\n';
+    const s = await installSkill({ content: grouped }, dir);
+    expect(s.path).toBe("skills/video/contoh-video/SKILL.md");
+    expect(
+      await readFile(join(dir, "video", "contoh-video", "SKILL.md"), "utf8"),
+    ).toBe(grouped);
   });
 
   it("installs from a GitHub link (fetches the raw URL)", async () => {

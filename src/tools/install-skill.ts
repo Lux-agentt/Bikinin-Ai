@@ -67,10 +67,10 @@ export const installSkillTool = defineTool({
       return {
         ok: true,
         summary: `skill "${s.name}" terpasang`,
-        output: `Skill "${s.name}" terpasang di skills/${s.name}/SKILL.md — ${s.description} (tersedia di run berikutnya, tanpa restart).`,
+        output: `Skill "${s.name}" terpasang di ${s.path} — ${s.description} (tersedia di run berikutnya, tanpa restart).`,
         changes: [
           {
-            path: `skills/${s.name}/SKILL.md`,
+            path: s.path,
             op: "created" as const,
             bytes: s.bytes,
           },

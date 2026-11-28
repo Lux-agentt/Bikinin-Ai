@@ -217,6 +217,65 @@ describe("readSkill", () => {
   });
 });
 
+describe("folder per kelompok (2026-11-28: skills/<kelompok>/<nama>/SKILL.md)", () => {
+  async function makeGrouped() {
+    const dir = await tempWorkspace();
+    await makeSkill(
+      dir,
+      "video/remotion",
+      `---\nname: remotion\ndescription: Buat video.\ncategory: video\n---\n\n# Remotion\n`,
+    );
+    await makeSkill(
+      dir,
+      "coding/api-design",
+      `---\nname: api-design\ndescription: Rancang API.\ncategory: coding\n---\n\n# API\n`,
+    );
+    await makeSkill(dir, "website", GOOD);
+    return dir;
+  }
+
+  it("menemukan skill di folder kelompok dengan kategori dari frontmatter", async () => {
+    const dir = await makeGrouped();
+    const skills = await listSkills(dir);
+    expect(skills.map((s) => s.name)).toEqual([
+      "api-design",
+      "remotion",
+      "website",
+    ]);
+    expect(
+      skills.find((s) => s.name === "remotion")?.category,
+    ).toBe("video");
+    expect(
+      skills.find((s) => s.name === "api-design")?.category,
+    ).toBe("coding");
+  });
+
+  it("readSkill membaca file dari folder kelompok", async () => {
+    const dir = await makeGrouped();
+    expect(await readSkill(dir, "remotion")).toContain("# Remotion");
+    expect(await readSkill(dir, "api-design")).toContain("# API");
+    expect(await readSkill(dir, "website")).toBe(GOOD);
+  });
+
+  it("nama yang sama di kedua layout hanya dihitung sekali (kelompok menang)", async () => {
+    const dir = await makeGrouped();
+    await makeSkill(
+      dir,
+      "coding/dup",
+      `---\nname: dup\ndescription: Versi kelompok.\ncategory: coding\n---\n\n# Kelompok\n`,
+    );
+    await makeSkill(
+      dir,
+      "dup",
+      `---\nname: dup\ndescription: Versi datar.\ncategory: writing\n---\n\n# Datar\n`,
+    );
+    const skills = await listSkills(dir);
+    expect(skills.filter((s) => s.name === "dup")).toHaveLength(1);
+    expect(skills.find((s) => s.name === "dup")?.category).toBe("coding");
+    expect(await readSkill(dir, "dup")).toContain("# Kelompok");
+  });
+});
+
 describe("read_skill tool", () => {
   it("reads the website skill from the repo skills dir", async () => {
     const ws = await tempWorkspace();
