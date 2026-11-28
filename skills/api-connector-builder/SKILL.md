@@ -1,6 +1,6 @@
 ---
 name: api-connector-builder
-category: backend-api
+category: coding
 description: Build a new API connector or provider by matching the target repo's existing integration pattern exactly. Use when adding one more integration without inventing a second architecture.
 metadata:
   version: "1.0.0"

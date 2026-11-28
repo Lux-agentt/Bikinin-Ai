@@ -1,6 +1,6 @@
 ---
 name: godot-testing
-category: framework
+category: coding
 description: Testing Godot 4 GDScript projects - a zero-dependency headless check scene, gdUnit4 and GUT suites, scene-runner tests, signal assertions, and CI commands. Use when adding tests to a Godot project, setting up CI, or proving a change did not break the game.
 origin: ECC
 ---

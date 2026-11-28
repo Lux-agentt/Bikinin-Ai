@@ -1,6 +1,6 @@
 ---
 name: cpp-coding-standards
-category: framework
+category: coding
 description: C++ coding standards based on the C++ Core Guidelines (isocpp.github.io). Use when writing, reviewing, or refactoring C++ code to enforce modern, safe, and idiomatic practices.
 metadata:
   origin: ECC
