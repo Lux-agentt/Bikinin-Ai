@@ -2107,6 +2107,35 @@ function listen(runId) {
     });
   }
   // EventSource resumes by itself with Last-Event-ID; it is closed on run_finished.
+  // Bila stream putus (mis. server di-restart selagi run jalan), EventSource
+  // retry selamanya tanpa run_finished — busy nyangkut dan pengguna tidak
+  // bisa pindah chat ("Hentikan agent dulu" terus). Cek sekali per error:
+  // bila run sudah tidak ada di server (404), bebaskan UI otomatis.
+  let livenessChecked = false;
+  es.onerror = () => {
+    if (livenessChecked || state.source !== es) return;
+    livenessChecked = true;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 3000);
+    fetch(`/api/runs/${runId}/events`, { signal: ctrl.signal })
+      .then((r) => {
+        clearTimeout(timer);
+        ctrl.abort(); // tutup koneksi probe — status header saja yang dibutuhkan
+        if (r.status === 404 && state.source === es) {
+          es.close();
+          state.source = null;
+          setBusy(false);
+          if (state.think) finishThink("stopped", state.think.count);
+          toast("Koneksi ke server putus — run dihentikan, sudah bisa pindah chat.");
+        }
+      })
+      .catch(() => {
+        // Jaringan sempat putus / server belum balas: biarkan EventSource
+        // retry sendiri; cek ulang di error berikutnya.
+        clearTimeout(timer);
+        livenessChecked = false;
+      });
+  };
 }
 
 async function start(message) {
@@ -2196,6 +2225,7 @@ async function stopRun() {
       if (state.source) state.source.close();
       state.source = null;
       setBusy(false);
+      if (state.think) finishThink("stopped", state.think.count);
       toast("Agent sudah berhenti — run tidak ditemukan di server.");
       return;
     }

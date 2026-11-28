@@ -131,6 +131,19 @@ describe("stop membebaskan UI yang macet", () => {
       /async function stopRun\(\) \{[\s\S]*?r\.status === 404[\s\S]*?setBusy\(false\)/,
     );
   });
+
+  it("stopRun saat run hilang (404) juga menutup blok think yang nyangkut", () => {
+    expect(js).toMatch(
+      /Run sudah tidak ada di server[\s\S]*?if \(state\.think\) finishThink\("stopped"/,
+    );
+  });
+
+  it("stream putus + run tidak ada di server (404) membebaskan UI otomatis", () => {
+    expect(js).toMatch(/es\.onerror = \(\) => \{/);
+    expect(js).toMatch(/fetch\(`\/api\/runs\/\$\{runId\}\/events`/);
+    expect(js).toMatch(/if \(r\.status === 404 && state\.source === es\)/);
+    expect(js).toMatch(/toast\("Koneksi ke server putus/);
+  });
 });
 
 describe("tab Eval di folder sheet", () => {
