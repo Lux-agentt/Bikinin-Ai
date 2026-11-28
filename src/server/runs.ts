@@ -13,6 +13,7 @@ import {
 } from "../agent/loop.js";
 import {
   isAutoApproveEnabled,
+  isLessonsModelExtractEnabled,
   isMemoryModelExtractEnabled,
   type Config,
 } from "../config.js";
@@ -72,7 +73,11 @@ import {
 } from "./ledger.js";
 import { MAX_SESSIONS, SessionHistory } from "../agent/history.js";
 import { rebuildHistory } from "../agent/replay.js";
-import { buildLessonsContext, extractLessons } from "../agent/lessons.js";
+import {
+  buildLessonsContext,
+  extractLessons,
+  extractLessonsWithModel,
+} from "../agent/lessons.js";
 import {
   buildMemoryContext,
   extractFacts,
@@ -908,9 +913,15 @@ export class RunManager {
   }
 
   /**
-   * Rule-based episodic lesson update from a finished run. Cheap by design:
-   * no model call, only deterministic extraction of failure signals from
-   * the transcript. Writes nothing when the run taught nothing durable.
+   * Episodic lesson update from a finished run. Rule-based extraction is
+   * always on and costs nothing. Auto-learn (28 Nov 2026, owner rule) adds
+   * an OPTIONAL model-assisted pass (flag BIKININ_LESSONS_MODEL_EXTRACT,
+   * on by default): exactly one call, made DIRECTLY against the first
+   * `:free` provider — never through the fallback chain, so it can never
+   * spill to a paid model. The model writes the lesson itself (root cause
+   * + correct fix, with evidence) instead of the rule template "coba tool
+   * lain". Any failure is swallowed; lessons stay rule-only.
+   * Writes nothing when no durable lesson was learned.
    */
   private async updateLessons(result: AgentResult): Promise<void> {
     const lessons = extractLessons(
@@ -918,6 +929,32 @@ export class RunManager {
       result.summary,
       result.status,
     );
+    if (isLessonsModelExtractEnabled(this.cfg.BIKININ_LESSONS_MODEL_EXTRACT)) {
+      const free = this.cfg.providers.find((p) => isFreeModel(p.model));
+      if (free) {
+        const deep = await extractLessonsWithModel(
+          result.transcript,
+          result.summary,
+          result.status,
+          {
+            enabled: true,
+            freeModel: free.model,
+            callFreeModel: async (prompt) =>
+              (
+                await createOpenAiLlm({
+                  baseURL: free.baseUrl,
+                  apiKey: free.apiKey,
+                }).chat({
+                  model: free.model,
+                  messages: [{ role: "user", content: prompt }],
+                  tools: [],
+                })
+              ).text,
+          },
+        ).catch(() => []);
+        lessons.push(...deep);
+      }
+    }
     if (lessons.length === 0) return;
     await appendLessons(this.opts.workspace, lessons);
   }

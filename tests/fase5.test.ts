@@ -192,7 +192,7 @@ describe("plan-first", () => {
 });
 
 describe("retry budget", () => {
-  it("panggilan sama gagal 3x -> run berhenti, tidak muter", async () => {
+  it("panggilan sama gagal 3x -> satu giliran diagnosis, gagal 3x lagi -> run berhenti", async () => {
     const missing = () =>
       withCalls(call(`c${Math.random()}`, "read_file", { path: "tidak-ada.txt" }));
     const { events, result } = await run([
@@ -204,11 +204,74 @@ describe("retry budget", () => {
       missing(),
       missing(),
       missing(),
+      missing(),
+      missing(),
+      missing(),
       finalText("seharusnya tidak sampai sini"),
     ]);
     expect(result.status).toBe("error");
     expect(result.summary).toMatch(/3x berturut-turut/);
     expect(ofType(events, "error").some((e) => !e.retryable)).toBe(true);
+  });
+
+  it("giliran diagnosis: agent memeriksa dulu, lalu run selesai", async () => {
+    const seenMessages: Array<Array<{ role?: string; content?: unknown }>> =
+      [];
+    const responses: ChatResult[] = [
+      withCalls(
+        call("c0", "update_plan", {
+          items: [{ text: "Baca file", status: "doing" }],
+        }),
+      ),
+      withCalls(call("c1", "read_file", { path: "tidak-ada.txt" })),
+      withCalls(call("c2", "read_file", { path: "tidak-ada.txt" })),
+      withCalls(call("c3", "read_file", { path: "tidak-ada.txt" })),
+      // Giliran diagnosis: agent menjalankan satu pemeriksaan yang
+      // membedakan (bukan mengulang read_file yang sama).
+      withCalls(call("c4", "list_dir", { path: "." })),
+      finalText("file memang tidak ada, dibuat baru"),
+    ];
+    let i = 0;
+    const recording: LlmClient = {
+      async chat(p) {
+        seenMessages.push(p.messages as Array<{
+          role?: string;
+          content?: unknown;
+        }>);
+        const r = responses[i++];
+        if (!r) throw new Error("skrip habis");
+        if (r.text) p.onText?.(r.text);
+        return r;
+      },
+    };
+    const workspace = await tempWorkspace();
+    const events: AgentEvent[] = [];
+    const emit = createEmitter("run_test", (e) => events.push(e));
+    const result = await runAgent({
+      llm: recording,
+      model: "test-model",
+      systemPrompt: "sys",
+      message: "tes",
+      sessionId: "s_test",
+      workspace,
+      limits: { maxCostUsd: 1 },
+      prices: { inPerM: 1, outPerM: 2 },
+      emit,
+      approve: async () => false,
+    });
+    expect(result.status).toBe("completed");
+    // Pesan diagnosis benar-benar disuntikkan ke riwayat sebelum giliran
+    // pemeriksaan — agent tidak langsung berhenti di 3x pertama.
+    const diagnosisSeen = seenMessages.some((msgs) =>
+      msgs.some(
+        (m) =>
+          m.role === "system" &&
+          typeof m.content === "string" &&
+          m.content.includes("hipotesis penyebabnya"),
+      ),
+    );
+    expect(diagnosisSeen).toBe(true);
+    expect(ofType(events, "tool_call_finished")).toHaveLength(5);
   });
 });
 

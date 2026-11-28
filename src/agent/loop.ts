@@ -219,6 +219,10 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
   >();
   let lastFailKey = "";
   let failStreak = 0;
+  let selfDebugUsed = false;
+  // Self-debug turn (28 Nov 2026, owner rule: agent menyelesaikan masalah
+  // sendiri): the first time the same call fails 3x, the run does NOT stop
+  // — it gets ONE diagnosis turn first. After that, a repeat stops the run.
 
   // --- Fase 6: plan mode + self-check state. ---
   // Plan mode is opt-in: the model calls request_plan_approval after
@@ -779,7 +783,9 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
     );
 
     // Fase 5: retry budget — panggilan yang sama gagal 3x berturut-turut
-    // dengan cara yang sama berarti agent muter. Berhenti dan tanya pengguna.
+    // dengan cara yang sama berarti agent muter. Satu giliran diagnosis
+    // dulu (lihat blok stopReason di bawah); kalau masih gagal, berhenti
+    // dan tanya pengguna.
     let stopReason: string | null = null;
     for (const o of outputs) {
       if (o.failed) {
@@ -994,6 +1000,27 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         );
       }
       if (stopReason) {
+        // Self-debug turn (28 Nov 2026): jangan langsung berhenti di 3x
+        // pertama — beri agent satu giliran untuk mendiagnosis sendiri
+        // (pola + hipotesis + SATU pemeriksaan yang membedakan), sesuai
+        // pola agent-introspection-debugging: capture → diagnosis →
+        // contained recovery. Subagent dikecualikan (langkahnya terbatas,
+        // hanya riset baca). Kalau panggilan yang sama gagal 3x lagi,
+        // run berhenti seperti biasa.
+        if (!selfDebugUsed && !d.isSubagent) {
+          selfDebugUsed = true;
+          lastFailKey = "";
+          failStreak = 0;
+          messages.push({
+            role: "system",
+            content:
+              "Panggilan yang sama gagal 3x berturut-turut — berhenti mengulang cara yang sama. " +
+              "Sebelum tool lain: nyatakan (1) pola kegagalannya, (2) hipotesis penyebabnya, " +
+              "(3) SATU pemeriksaan yang membedakan hipotesis itu (baca file, cek kondisi, atau satu perintah diagnostik) — lalu jalankan pemeriksaan itu, bukan mengulang panggilan yang gagal. " +
+              "Kalau pemeriksaan membuktikan hipotesis salah, ubah rencana; kalau panggilan yang sama gagal lagi, run berhenti dan tanyakan pengguna.",
+          });
+          continue;
+        }
         emit("error", {
           code: "tool_failed",
           message: stopReason,

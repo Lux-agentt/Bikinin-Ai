@@ -195,6 +195,7 @@ Supaya agent makin mirip Claude Code / Codex / Grok: bisa mencari di internet, b
 
 - [x] Self-check: agent memeriksa hasil sendiri sebelum menyatakan selesai (build/test/lint yang relevan, atau baca ulang jawaban terhadap permintaan awal), maks 2 putaran perbaikan, hasil tercatat sebagai event. Halaman HTML penuh wajib lolos cek tampilan minimal (CSS nyata + font + warna, nav bukan bullet list polos — `src/agent/self-check.ts`).
 - [x] Ingatan episodik: pelajaran dari run yang gagal/berulang disimpan ke `workspace/.bikinin/lessons.md` (maks 32 KB, tanpa rahasia); pelajaran relevan di-inject ke system prompt run berikutnya (cocok kata kunci).
+- [x] Auto-learn (28 Nov 2026, aturan pemilik): setelah tiap run selesai, model menulis sendiri pelajarannya (penyebab akar + perbaikan yang benar, dengan bukti) lewat 1 panggilan ke provider `:free` pertama — tidak pernah model berbayar; gagal diam-diam → pelajaran tetap rule-only. Flag `BIKININ_LESSONS_MODEL_EXTRACT` (default nyala; off/false/0 = mati). Gagal 3x yang sama → satu giliran diagnosis dulu (pola + hipotesis + satu pemeriksaan yang membedakan), baru berhenti dan tanya pengguna kalau masih gagal.
 - [x] Vision: tool `inspect_image` mengirim gambar ke model yang mendukung image input; fallback ke model berikutnya yang mendukung, atau jujur melapor bila tidak tersedia.
 - [x] Plan mode: tugas besar meminta persetujuan rencana sebelum mengubah file (pakai dialog approval yang sudah ada).
 - [x] Diff review: perubahan file tampil sebagai ringkasan diff di UI/event, tidak diterapkan diam-diam.

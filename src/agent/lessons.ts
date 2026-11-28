@@ -1,17 +1,23 @@
 // Episodic memory: lessons learned from failed or repeated runs.
 // Pure logic (no filesystem here) so it is easy to test. Disk lives in
 // src/server/persistence.ts. Design choice, documented:
-// - Extraction is RULE-BASED and deterministic, never a model call. Only
-//   signals visible in the run itself are used: a tool failing repeatedly,
-//   a retry loop, a run ending budget_exceeded/error, and a fix that worked
-//   after an error. Raw transcripts are never stored here; session
-//   transcripts live in the per-session files.
+// - Extraction is RULE-BASED by default and deterministic: only signals
+//   visible in the run itself are used (a tool failing repeatedly, a retry
+//   loop, a run ending budget_exceeded/error, and a fix that worked after
+//   an error). Raw transcripts are never stored here; session transcripts
+//   live in the per-session files.
+// - Auto-learn (28 Nov 2026, owner rule: "biar auto learn"): ONE extra
+//   model call per finished run (extractLessonsWithModel) lets the model
+//   write the lesson itself — root cause + the correct fix, with evidence
+//   — instead of the rule template "coba tool lain". It runs only against
+//   a `:free` provider, never throws, and the rule-based lessons always
+//   run first, so a model failure leaves rule-only lessons.
 // - Anything that looks like a secret is dropped before it can be written.
 // - Injection is a small char-budgeted slice of the lessons whose keywords
 //   overlap the current request, prepended to the system prompt, so the
 //   model sees the relevant past mistakes without blowing the token budget.
 import type { ChatCompletionMessageParam as Msg } from "openai/resources/chat/completions";
-import { containsSecret } from "./memory.js";
+import { containsSecret, isFreeModel } from "./memory.js";
 
 export const LESSONS_INJECT_BUDGET = 2000; // chars injected into the system prompt
 export const LESSONS_MAX_BYTES = 32 * 1024; // cap for the lessons file on disk
@@ -128,6 +134,17 @@ function userTask(transcript: Msg[], summary: string): string {
   );
 }
 
+/** What finally worked after the failures, if anything: the first success
+ *  of a different tool that came after the last failure. */
+function findFix(outcomes: ToolOutcome[]): ToolOutcome | undefined {
+  const lastFailureIdx = outcomes.reduce((acc, o, i) => (!o.ok ? i : acc), -1);
+  return lastFailureIdx >= 0
+    ? outcomes
+        .slice(lastFailureIdx + 1)
+        .find((o) => o.ok && o.tool !== outcomes[lastFailureIdx].tool)
+    : undefined;
+}
+
 /** Derives the run signals from the transcript alone. */
 export function deriveSignals(transcript: Msg[]): RunSignals {
   const outcomes = collectOutcomes(transcript);
@@ -218,15 +235,7 @@ export function extractLessons(
       failures.set(o.tool, f);
     }
   }
-  // What finally worked after the failures, if anything: the first success
-  // of a different tool that came after the last failure.
-  const lastFailureIdx = outcomes.reduce((acc, o, i) => (!o.ok ? i : acc), -1);
-  const fix =
-    lastFailureIdx >= 0
-      ? outcomes
-          .slice(lastFailureIdx + 1)
-          .find((o) => o.ok && o.tool !== outcomes[lastFailureIdx].tool)
-      : undefined;
+  const fix = findFix(outcomes);
 
   for (const [tool, f] of failures) {
     if (f.count < 2) continue;
@@ -308,6 +317,128 @@ export function extractLessons(
   }
 
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-learn: the model writes the lesson itself (28 Nov 2026, owner rule).
+// The rule-based extraction above can only say "try another tool" — it
+// cannot name the root cause (e.g. "Root.tsx registers no <Composition>").
+// This pass asks the model, once per finished run, to evaluate its own
+// failures the way the agent-self-evaluation skill teaches: score the gap
+// with EVIDENCE, name the root cause, and state the correct fix. The reply
+// is parsed with the same strict line format and secret filter as the
+// rule-based lessons, so a bad model reply can only add nothing.
+// ---------------------------------------------------------------------------
+
+export interface LessonExtractDeps {
+  /** BIKININ_LESSONS_MODEL_EXTRACT — on by default. */
+  enabled: boolean;
+  /** First `:free` provider's model name; undefined when none is configured. */
+  freeModel?: string;
+  /** Single direct call against that free provider (no fallback chain). */
+  callFreeModel: (prompt: string) => Promise<string>;
+}
+
+interface LessonSignals {
+  task: string;
+  failures: Array<{ tool: string; count: number; lastError: string }>;
+  fix?: { tool: string; summary: string };
+  correction?: string | null;
+  status: string;
+}
+
+function buildLessonExtractPrompt(s: LessonSignals): string {
+  const lines = [
+    "Kamu mengevaluasi satu run agent yang baru selesai. Tulis pelajaran dari kegagalannya — bukan sekadar 'coba tool lain', tapi penyebab AKAR + perbaikan yang BENAR, dengan bukti dari log.",
+    "",
+    `Tugas: ${s.task}`,
+    `Status run: ${s.status}`,
+  ];
+  for (const f of s.failures)
+    lines.push(`Gagal: ${f.tool} (${f.count}x) — ${f.lastError}`);
+  if (s.fix)
+    lines.push(`Yang akhirnya berhasil: ${s.fix.tool} — ${s.fix.summary}`);
+  if (s.correction) lines.push(`Koreksi pengguna: ${s.correction}`);
+  lines.push(
+    "",
+    "Tulis MAKS 3 pelajaran, satu per baris, format persis ini (jangan tambah teks lain):",
+    "Tugas: <tugas singkat> | Gagal: <apa yang gagal + bukti> | Berhasil: <yang akhirnya berhasil, kosongkan bila tidak ada> | Aturan: <aturan untuk run berikutnya — sebut penyebab akar dan perbaikan yang benar, bukan 'coba tool lain'>",
+    "Bila run tidak mengajarkan apa pun yang tahan lama, balas dengan baris kosong.",
+    "Jangan tulis rahasia (API key, token, kata sandi, kode klaim).",
+  );
+  return lines.join("\n");
+}
+
+const LESSON_LINE_RE =
+  /Tugas:\s*(.+?)\s*\|\s*Gagal:\s*(.+?)\s*\|\s*Berhasil:\s*(.*?)\s*\|\s*Aturan:\s*(.+)/;
+
+/** Parses the model reply: at most 3 well-formed lines, each secret-filtered. */
+function parseLessonLines(reply: string): FreshLesson[] {
+  const out: FreshLesson[] = [];
+  for (const line of reply.split("\n")) {
+    const m = LESSON_LINE_RE.exec(line.trim());
+    if (!m) continue;
+    const cleaned = cleanLesson({
+      task: m[1],
+      gagal: m[2],
+      berhasil: m[3],
+      aturan: m[4],
+    });
+    if (cleaned) out.push(cleaned);
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
+/**
+ * Model-assisted lesson extraction. Same gate as the memory equivalent:
+ * off → no call; no free provider → no call; nothing worth learning from
+ * the run → no call. Returns [] in all three cases, and also when the
+ * model call itself fails. Never throws, never touches a paid model.
+ */
+export async function extractLessonsWithModel(
+  transcript: Msg[],
+  summary: string,
+  status: string,
+  deps: LessonExtractDeps,
+): Promise<FreshLesson[]> {
+  if (!deps.enabled) return [];
+  if (!deps.freeModel || !isFreeModel(deps.freeModel)) return [];
+  const outcomes = collectOutcomes(transcript);
+  const failuresMap = new Map<string, { count: number; lastError: string }>();
+  for (const o of outcomes) {
+    if (o.ok) continue;
+    const f = failuresMap.get(o.tool) ?? { count: 0, lastError: "" };
+    f.count += 1;
+    f.lastError = o.summary;
+    failuresMap.set(o.tool, f);
+  }
+  const correction =
+    status === "completed" ? firstCorrectionMessage(transcript) : null;
+  const hasSignal =
+    failuresMap.size > 0 ||
+    correction !== null ||
+    status === "budget_exceeded" ||
+    status === "error";
+  if (!hasSignal) return [];
+  const fix = findFix(outcomes);
+  try {
+    const reply = await deps.callFreeModel(
+      buildLessonExtractPrompt({
+        task: userTask(transcript, summary),
+        failures: [...failuresMap.entries()].map(([tool, f]) => ({
+          tool,
+          ...f,
+        })),
+        fix: fix ? { tool: fix.tool, summary: fix.summary } : undefined,
+        correction,
+        status,
+      }),
+    );
+    return parseLessonLines(reply);
+  } catch {
+    return [];
+  }
 }
 
 const LINE_RE =

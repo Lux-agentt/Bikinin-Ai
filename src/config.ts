@@ -20,6 +20,12 @@ const LimitsSchema = z.object({
   // on/true/1 enable it; see isMemoryModelExtractEnabled below.
   // Optional so older hand-built Config literals still compile.
   BIKININ_MEMORY_MODEL_EXTRACT: z.string().optional(),
+  // Model-assisted lesson extraction / auto-learn (28 Nov 2026, owner rule:
+  // "biar auto learn"). ON by default; only off/false/0 disable it. Exactly
+  // one extra call per finished run, made DIRECTLY against the first `:free`
+  // provider — never through the fallback chain, so it can never spill to a
+  // paid model. Any failure is swallowed; lessons stay rule-only.
+  BIKININ_LESSONS_MODEL_EXTRACT: z.string().optional(),
   // Auto-approve low/medium-risk approvals (28 Nov 2026, owner rule:
   // "otomatis allow aja, kecuali yang high impact"). OFF by default; only
   // on/true/1 enable it. High-risk approvals still ask; hard blocks
@@ -39,6 +45,14 @@ export function isMemoryModelExtractEnabled(
 ): boolean {
   if (value === undefined) return false;
   return ["on", "true", "1"].includes(value.trim().toLowerCase());
+}
+
+/** BIKININ_LESSONS_MODEL_EXTRACT is ON by default; only off/false/0 turn it off. */
+export function isLessonsModelExtractEnabled(
+  value: string | undefined,
+): boolean {
+  if (value === undefined) return true;
+  return !["off", "false", "0"].includes(value.trim().toLowerCase());
 }
 
 export interface Config extends z.infer<typeof LimitsSchema> {

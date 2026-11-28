@@ -7,6 +7,7 @@ import {
   buildLessonsContext,
   deriveSignals,
   extractLessons,
+  extractLessonsWithModel,
   formatLessons,
   LESSONS_INJECT_BUDGET,
   LESSONS_MAX_BYTES,
@@ -374,5 +375,117 @@ describe("persistence on disk", () => {
       ]),
     ).toBe(0);
     expect(await readLessonEntries(ws)).toHaveLength(1);
+  });
+});
+
+describe("extractLessonsWithModel (auto-learn, satu panggilan :free)", () => {
+  // Run render_video yang gagal 3x karena Root.tsx tidak mendaftarkan
+  // komposisi — pelajaran aturan cuma bilang "coba edit_file", sedangkan
+  // model menulis penyebab akarnya.
+  const failingTranscript: Msg[] = [
+    user("render video Scene6"),
+    asstTool("c1", "render_video", JSON.stringify({ project: "rizqi-scene-new" })),
+    toolMsg("c1", "GAGAL: npx remotion compositions gagal (exit 1):"),
+    asstTool("c2", "render_video", JSON.stringify({ project: "rizqi-scene-new" })),
+    toolMsg("c2", "GAGAL: npx remotion compositions gagal (exit 1):"),
+    asstTool("c3", "render_video", JSON.stringify({ project: "rizqi-scene-new" })),
+    toolMsg("c3", "GAGAL: npx remotion compositions gagal (exit 1):"),
+  ];
+
+  it("parses a well-formed model reply into a lesson with the root cause", async () => {
+    let seenPrompt = "";
+    const lessons = await extractLessonsWithModel(
+      failingTranscript,
+      "render gagal",
+      "error",
+      {
+        enabled: true,
+        freeModel: "nvidia/nemotron-3.5-super-vl:free",
+        callFreeModel: async (prompt) => {
+          seenPrompt = prompt;
+          return "Tugas: render video Scene6 | Gagal: render_video gagal 3×: npx remotion compositions gagal (exit 1) — 0 komposisi terdaftar | Berhasil:  | Aturan: Root.tsx harus me-render <Composition id=\"Scene6\" component={Scene6} ... />; tanpa itu Remotion menemukan 0 komposisi dan render selalu gagal.";
+        },
+      },
+    );
+    expect(seenPrompt).toContain("render_video");
+    expect(seenPrompt).toContain("compositions gagal");
+    expect(lessons).toHaveLength(1);
+    expect(lessons[0].aturan).toContain("Composition");
+    expect(lessons[0].aturan).toContain("Root.tsx");
+  });
+
+  it("ignores garbage lines and secret lines, caps at 3 lessons", async () => {
+    const lessons = await extractLessonsWithModel(
+      failingTranscript,
+      "render gagal",
+      "error",
+      {
+        enabled: true,
+        freeModel: "google/gemma-4-31b-it:free",
+        callFreeModel: async () =>
+          [
+            "ini bukan pelajaran",
+            "Tugas: render video satu | Gagal: render_video gagal sekali | Berhasil:  | Aturan: aturan satu yang benar dan panjang",
+            "Tugas: render video dua | Gagal: render_video gagal dua kali | Berhasil:  | Aturan: kunci sk-abcdef1234567890",
+            "Tugas: render video tiga | Gagal: render_video gagal tiga kali | Berhasil:  | Aturan: aturan tiga yang benar dan panjang",
+            "Tugas: render video empat | Gagal: render_video gagal empat kali | Berhasil:  | Aturan: aturan empat yang benar dan panjang",
+            "Tugas: render video lima | Gagal: render_video gagal lima kali | Berhasil:  | Aturan: aturan lima yang benar dan panjang",
+          ].join("\n"),
+      },
+    );
+    expect(lessons).toHaveLength(3);
+    expect(lessons.map((l) => l.task)).toEqual([
+      "render video satu",
+      "render video tiga",
+      "render video empat",
+    ]);
+    expect(JSON.stringify(lessons)).not.toContain("sk-");
+  });
+
+  it("never calls the model when disabled, unpaid, or nothing to learn", async () => {
+    const clean: Msg[] = [user("halo"), { role: "assistant", content: "hai" }];
+    let calls = 0;
+    const spy = async () => {
+      calls += 1;
+      return "";
+    };
+    expect(
+      await extractLessonsWithModel(failingTranscript, "x", "error", {
+        enabled: false,
+        freeModel: "nvidia/nemotron-3.5-super-vl:free",
+        callFreeModel: spy,
+      }),
+    ).toEqual([]);
+    expect(
+      await extractLessonsWithModel(failingTranscript, "x", "error", {
+        enabled: true,
+        freeModel: "anthropic/claude-haiku-4.5",
+        callFreeModel: spy,
+      }),
+    ).toEqual([]);
+    expect(
+      await extractLessonsWithModel(clean, "x", "completed", {
+        enabled: true,
+        freeModel: "nvidia/nemotron-3.5-super-vl:free",
+        callFreeModel: spy,
+      }),
+    ).toEqual([]);
+    expect(calls).toBe(0);
+  });
+
+  it("returns [] when the model call fails", async () => {
+    const lessons = await extractLessonsWithModel(
+      failingTranscript,
+      "render gagal",
+      "error",
+      {
+        enabled: true,
+        freeModel: "nvidia/nemotron-3.5-super-vl:free",
+        callFreeModel: async () => {
+          throw new Error("429 quota habis");
+        },
+      },
+    );
+    expect(lessons).toEqual([]);
   });
 });
