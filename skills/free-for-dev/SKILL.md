@@ -1,6 +1,6 @@
 ---
 name: free-for-dev
-category: lainnya
+category: coding
 description: Cari layanan gratis — hosting, API, AI, domain, database — dari daftar free-for-dev; pakai saat user butuh layanan gratis atau tanya opsi gratis.
 ---
 # Free-for-Dev

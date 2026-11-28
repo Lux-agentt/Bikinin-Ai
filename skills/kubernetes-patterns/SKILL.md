@@ -1,6 +1,6 @@
 ---
 name: kubernetes-patterns
-category: devops-infra
+category: coding
 description: Kubernetes workload patterns, resource management, RBAC, probes, autoscaling, ConfigMap/Secret handling, and kubectl debugging for production-grade deployments. Use when writing or reviewing Kubernetes manifests, or debugging probes, RBAC, autoscaling, resource limits, or pods that keep getting evicted.
 metadata:
   origin: ECC

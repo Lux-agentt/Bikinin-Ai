@@ -1,6 +1,6 @@
 ---
 name: opensource-pipeline
-category: git-ops
+category: coding
 description: "Open-source pipeline: fork, sanitize, and package private projects for safe public release. Chains 3 agents (forker, sanitizer, packager). Triggers: '/opensource', 'open source this', 'make this public', 'prepare for open source'. Use when a private project must be forked, stripped of secrets, and packaged for public release."
 metadata:
   origin: ECC

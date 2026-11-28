@@ -1,6 +1,6 @@
 ---
 name: bun-runtime
-category: mobile-desktop
+category: coding
 description: Bun as runtime, package manager, bundler, and test runner. When to choose Bun vs Node, migration notes, and Vercel support.
 metadata:
   origin: ECC

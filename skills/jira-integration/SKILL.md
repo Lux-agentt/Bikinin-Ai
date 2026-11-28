@@ -1,6 +1,6 @@
 ---
 name: jira-integration
-category: git-ops
+category: coding
 description: Retrieves Jira tickets, analyzes requirements, updates ticket status, adds comments, or transitions issues via MCP or direct REST API patterns.
 metadata:
   origin: ECC

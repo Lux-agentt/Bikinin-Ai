@@ -1,6 +1,6 @@
 ---
 name: homelab-network-readiness
-category: devops-infra
+category: coding
 description: Readiness checklist for homelab VLAN segmentation, local DNS filtering (Pi-hole, AdGuard Home), and WireGuard-style remote access. Use when planning or reviewing home network changes — splitting a flat network into trusted, IoT, guest, or management VLANs, moving DHCP to a local resolver, or adding VPN access — before changing router, firewall, DHCP, or VPN configuration.
 metadata:
   origin: community
