@@ -2,8 +2,8 @@
 // All model output is written with textContent or DOM nodes, never raw innerHTML
 // (the one exception is syntax highlighting, which escapes first, then wraps tokens).
 // Static markup lives in index.html; the browser never sees an API key.
-// localStorage is only used for small UI preferences (model + effort), never for
-// sessions or skills — those always come from the server.
+// localStorage is only used for small UI preferences (model + effort per chat),
+// never for sessions or skills — those always come from the server.
 import { parseBlocks } from "/md.js";
 
 const $ = (s) => document.querySelector(s);
@@ -43,6 +43,8 @@ const state = {
   files: new Map(), // path -> { bytes }
   pendingFiles: [], // File[] chosen via + button, uploaded when the run starts
   drafts: new Map(), // sessionId (null = layar awal) -> { text, files } — draf ketikan + lampiran per chat
+  modelsBySession: new Map(), // sessionId (null = layar awal) -> model — tiap chat ingat modelnya sendiri (permintaan user 28 Nov 2026: "setiap chat juga model berbeda jangan disamain")
+  effortsBySession: new Map(), // sessionId (null = layar awal) -> "sedang" | "tinggi" — effort juga per chat
   versions: [], // { path, bytes, title, content: string|null, runId }
   activeVersion: -1,
   evalSelected: null, // Set<string> | null — tugas eval yang dicentang (null = semua)
@@ -1032,8 +1034,14 @@ $("#revNewBtn").addEventListener("click", () => resetSession());
 function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem("bikinin.prefs") || "{}");
-    if (p.effort === "sedang" || p.effort === "tinggi")
-      state.curEffort = p.effort;
+    // Bentuk lama { model, effort } (satu model untuk semua chat) sengaja
+    // TIDAK dibaca lagi — model kini per chat (push 62).
+    for (const [k, v] of Object.entries(p.models ?? {}))
+      if (typeof v === "string")
+        state.modelsBySession.set(k === "" ? null : k, v);
+    for (const [k, v] of Object.entries(p.efforts ?? {}))
+      if (v === "sedang" || v === "tinggi")
+        state.effortsBySession.set(k === "" ? null : k, v);
     return p;
   } catch {
     return {};
@@ -1041,13 +1049,48 @@ function loadPrefs() {
 }
 function savePrefs() {
   try {
-    localStorage.setItem(
-      "bikinin.prefs",
-      JSON.stringify({ model: state.curModel, effort: state.curEffort }),
-    );
+    // Kunci null (layar awal) disimpan sebagai "" supaya bisa masuk JSON.
+    const models = {};
+    const efforts = {};
+    for (const [k, v] of state.modelsBySession) models[k ?? ""] = v;
+    for (const [k, v] of state.effortsBySession) efforts[k ?? ""] = v;
+    localStorage.setItem("bikinin.prefs", JSON.stringify({ models, efforts }));
   } catch {
     // Preferences are best-effort; the app works without them.
   }
+}
+
+function applySessionModel(detail) {
+  // Model + effort milik chat yang sedang dibuka — tiap chat ingat
+  // modelnya sendiri (permintaan user 28 Nov 2026: "setiap chat juga
+  // model berbeda jangan disamain"). Urutan: pilihan tersimpan di chat ini
+  // > model run terakhir di chat ini (dari log) > model utama server.
+  if (detail && state.sessionId !== detail.session_id) return; // pindah chat selagi restore jalan — jangan sentuh UI chat baru
+  const sid = state.sessionId;
+  let model = state.modelsBySession.get(sid);
+  let effort = state.effortsBySession.get(sid);
+  if ((!model || !effort) && detail) {
+    const lastRun = [...detail.runs]
+      .reverse()
+      .find((r) => r.events.some((e) => e.type === "run_started"));
+    const started = lastRun?.events.find((e) => e.type === "run_started");
+    if (!model && started?.model && state.models.includes(started.model))
+      model = started.model;
+    if (
+      !effort &&
+      (started?.effort === "sedang" || started?.effort === "tinggi")
+    )
+      effort = started.effort;
+  }
+  state.curModel =
+    model && state.models.includes(model) ? model : (state.models[0] ?? null);
+  state.curEffort = effort ?? "sedang";
+  // Ingat hasil turunan dari log supaya chat ini konsisten setelahnya.
+  if (state.curModel) state.modelsBySession.set(sid, state.curModel);
+  state.effortsBySession.set(sid, state.curEffort);
+  savePrefs();
+  updateModelLabel();
+  renderModelList();
 }
 
 function updateModelLabel() {
@@ -1098,6 +1141,7 @@ $("#modelBtn").addEventListener("click", (e) => {
 });
 $("#modelSelect").addEventListener("change", () => {
   state.curModel = $("#modelSelect").value;
+  state.modelsBySession.set(state.sessionId, state.curModel);
   savePrefs();
   updateModelLabel();
   closePops();
@@ -1111,6 +1155,7 @@ $("#ringBtn").addEventListener("click", (e) => {
 document.querySelectorAll("#effortSeg button").forEach((b) => {
   b.addEventListener("click", () => {
     state.curEffort = b.dataset.effort;
+    state.effortsBySession.set(state.sessionId, state.curEffort);
     savePrefs();
     updateModelLabel();
     closePops();
@@ -2528,6 +2573,13 @@ async function start(message, opts = {}) {
     const data = await r.json();
     state.sessionId = data.session_id;
     trackRun(data.session_id, data.run_id);
+    // Model + effort yang dipakai run ini milik sesi ini (bukan global).
+    // Di layar awal, curModel adalah pilihan layar awal — ikut ke sesi baru.
+    if (state.curModel) state.modelsBySession.set(data.session_id, state.curModel);
+    state.effortsBySession.set(data.session_id, state.curEffort);
+    state.modelsBySession.delete(null);
+    state.effortsBySession.delete(null);
+    savePrefs();
     // Run ini membuat sesi baru (dari layar awal): pesan yang diantre dari
     // layar awal ikut sesi baru ini, bukan nyangkut tanpa sesi.
     if (isNewSession) {
@@ -2700,6 +2752,7 @@ function resetSession() {
   state.explainRaw = "";
   setMeters(0, 0);
   loadDraft(); // draf layar awal (biasanya kosong) — lampiran chat lama tidak ikut
+  applySessionModel(); // model layar awal (bukan model chat lama)
   updateRevBar();
   paintFolders();
   syncFolderPreviews();
@@ -2847,6 +2900,7 @@ async function restoreSession(sessionId) {
   // Segarkan tombol/input untuk chat yang baru dibuka (run di chat lain
   // tidak mengunci input chat ini) + jalankan antrean chat ini bila ada slot.
   loadDraft(); // draf chat ini (ketikan + lampiran yang sempat ditinggal)
+  applySessionModel(detail); // model chat ini (bukan model chat lama)
   refreshBusyUI();
   drainQueue();
 }
@@ -2928,16 +2982,11 @@ fetch("/api/config")
         : cfg.model
           ? [cfg.model]
           : [];
-    const prefs = loadPrefs();
-    state.curModel = state.models.includes(prefs.model)
-      ? prefs.model
-      : (state.models[0] ?? null);
-    state.curEffort = prefs.effort || state.curEffort;
+    loadPrefs();
+    applySessionModel(); // model layar awal (atau pilihan lama layar awal)
     $("#stModel").textContent = state.curModel ?? "belum dikonfigurasi";
-    updateModelLabel();
     if (!state.curModel)
       $("#modelLabel").textContent = "LLM belum dikonfigurasi";
-    renderModelList();
     setMeters(0, 0);
   })
   .catch(() => {
