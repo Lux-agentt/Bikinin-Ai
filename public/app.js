@@ -30,6 +30,8 @@ const state = {
   sessionId: null,
   queue: [], // antrean pesan { sessionId, message, files, noteEl } — dikirim saat slot run penuh, jalan otomatis begitu ada slot kosong
   starting: false, // start()/resumeRun() sedang upload + POST (kunci ganda sebelum run tercatat)
+  switching: false, // restoreSession sedang memuat chat lain — state.sessionId masih chat lama sampai selesai (tanpa ini, kirim saat pindah chat menghentikan run chat lama, 28 Nov 2026)
+  switchGen: 0, // nomor generasi pindah chat — supaya dua pindah beruntun tidak saling mematikan flag
   busy: false,
   replaying: false,
   lastPrompt: "",
@@ -172,7 +174,7 @@ function refreshBusyUI() {
   );
   sendBtn.replaceChildren(icon.firstElementChild.cloneNode(true));
   sendBtn.setAttribute("aria-label", ownRun ? "Hentikan agent" : "Kirim");
-  input.disabled = ownRun;
+  input.disabled = ownRun || state.switching;
   updateSendState();
   if (wasBusy && !state.busy) input.focus();
 }
@@ -1130,8 +1132,10 @@ function applySessionModel(detail) {
     )
       effort = started.effort;
   }
-  state.curModel =
-    model && state.models.includes(model) ? model : (state.models[0] ?? null);
+  // Aturan pemilik 28 Nov 2026: setiap chat baru, model dipilih pemilik —
+  // JANGAN jatuh ke model utama server diam-diam (dulu: state.models[0]).
+  // Chat lama tetap ingat pilihannya (tersimpan / run terakhir di chat itu).
+  state.curModel = model && state.models.includes(model) ? model : null;
   state.curEffort = effort ?? "sedang";
   // Ingat hasil turunan dari log supaya chat ini konsisten setelahnya.
   if (state.curModel) state.modelsBySession.set(sid, state.curModel);
@@ -1145,7 +1149,15 @@ function updateModelLabel() {
   const effortLabel = state.curEffort === "tinggi" ? "Tinggi" : "Sedang";
   $("#modelLabel").textContent = state.curModel
     ? `${state.curModel} · ${effortLabel}`
-    : "memuat…";
+    : state.models.length
+      ? "Pilih model dulu"
+      : "memuat…";
+  // "Model aktif" di popover lingkaran limit (#statPop) harus ikut pilihan
+  // chat ini — dulu cuma diisi sekali saat muat halaman, jadi menampilkan
+  // model utama server walau chat jalan pakai model lain (laporan pemilik
+  // 28 Nov 2026: chat pakai Haiku tapi popover bukan Haiku).
+  $("#stModel").textContent =
+    state.curModel ?? (state.models.length ? "Pilih model dulu" : "memuat…");
   document.querySelectorAll("#effortSeg button").forEach((b) => {
     b.classList.toggle("sel", b.dataset.effort === state.curEffort);
   });
@@ -1171,8 +1183,15 @@ function renderModelList() {
     opt.textContent = i === 0 ? `${m} (utama)` : m;
     sel.appendChild(opt);
   }
-  if (state.curModel && state.models.includes(state.curModel))
-    sel.value = state.curModel;
+  if (!state.curModel) {
+    // Belum ada pilihan di chat ini — jangan tampilkan model utama
+    // seolah-olah sudah dipilih pemilik.
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "— Pilih model —";
+    sel.prepend(opt);
+    sel.value = "";
+  } else if (state.models.includes(state.curModel)) sel.value = state.curModel;
 }
 
 function closePops() {
@@ -1188,8 +1207,9 @@ $("#modelBtn").addEventListener("click", (e) => {
   $("#modelBtn").setAttribute("aria-expanded", String(open));
 });
 $("#modelSelect").addEventListener("change", () => {
-  state.curModel = $("#modelSelect").value;
-  state.modelsBySession.set(state.sessionId, state.curModel);
+  state.curModel = $("#modelSelect").value || null;
+  if (state.curModel) state.modelsBySession.set(state.sessionId, state.curModel);
+  else state.modelsBySession.delete(state.sessionId);
   savePrefs();
   updateModelLabel();
   closePops();
@@ -2453,7 +2473,8 @@ function queueMessage(sessionId, message) {
 
 // Jalankan antrean pertama untuk chat yang sedang dibuka (kalau ada slot kosong).
 function drainQueue() {
-  if (state.runs.size >= MAX_PARALLEL || state.starting) return;
+  if (state.runs.size >= MAX_PARALLEL || state.starting || state.switching)
+    return;
   // Satu sesi cuma satu run — antrean chat ini baru jalan setelah run chat
   // ini selesai. Jangan ambil pesannya dari antrean sebelum itu: start()
   // akan menolaknya karena ownRunId() dan pesannya hilang begitu saja
@@ -2538,6 +2559,31 @@ async function reattachLiveRun() {
 }
 
 async function start(message, opts = {}) {
+  if (state.switching) {
+    // Pindah chat belum selesai (state.sessionId masih chat lama) — jangan
+    // kirim ke sesi yang salah; kembalikan teks ke composer.
+    if (!opts.alreadyShown) {
+      input.value = message;
+      autoGrow();
+      updateSendState();
+    }
+    toast("Tunggu sebentar — chat masih dibuka.");
+    return;
+  }
+  if (!state.curModel) {
+    // Aturan pemilik 28 Nov 2026: setiap chat baru, model dipilih pemilik
+    // dulu — run tidak boleh jalan pakai model utama server diam-diam.
+    // Kembalikan teks ke composer supaya pesan tidak hilang (kecuali pesan
+    // antrean yang sudah tampil sebagai bubble), lalu buka pemilih model.
+    if (!opts.alreadyShown) {
+      input.value = message;
+      autoGrow();
+      updateSendState();
+    }
+    toast("Pilih model dulu.");
+    if ($("#modelPop").hidden) $("#modelBtn").click();
+    return;
+  }
   // Satu sesi cuma boleh satu run aktif; slot global maks MAX_PARALLEL —
   // run ke-4 masuk antrean, bukan ditolak diam-diam.
   if (!message || ownRunId()) return;
@@ -2821,13 +2867,25 @@ async function restoreSession(sessionId) {
   // ini dibuka lagi, sambung ke stream run-nya bila masih hidup
   // (reattachRun), supaya kejadian live tetap tertempel dan refresh tidak
   // lagi menampilkan run sebagai "berhenti" padahal server masih kerja.
+  // Selama muat chat baru, state.sessionId masih chat lama — kirim apa pun
+  // sekarang akan salah sasaran (dan tombol kirim akan menghentikan run
+  // chat lama). Kunci input sampai pindah selesai (laporan pemilik
+  // 28 Nov 2026: chat 1 berhenti saat kasih kerjaan ke chat 2).
+  const gen = ++state.switchGen;
+  state.switching = true;
+  refreshBusyUI();
   let detail;
   try {
     detail = await fetchJson(`/api/sessions/${encodeURIComponent(sessionId)}`);
   } catch {
     toast("Gagal membuka riwayat");
+    if (gen === state.switchGen) {
+      state.switching = false;
+      refreshBusyUI();
+    }
     return;
   }
+  if (gen !== state.switchGen) return; // pindah yang lebih baru sudah jalan — yang ini basi
   closeFolderSheet();
   closeOverlay();
   state.sessionId = detail.session_id;
@@ -2949,8 +3007,13 @@ async function restoreSession(sessionId) {
   // tidak mengunci input chat ini) + jalankan antrean chat ini bila ada slot.
   loadDraft(); // draf chat ini (ketikan + lampiran yang sempat ditinggal)
   applySessionModel(detail); // model chat ini (bukan model chat lama)
-  refreshBusyUI();
-  drainQueue();
+  // Pindah selesai: buka kunci kirim (hanya bila tidak ada pindah yang
+  // lebih baru) + jalankan antrean chat ini bila ada slot.
+  if (gen === state.switchGen) {
+    state.switching = false;
+    refreshBusyUI();
+    drainQueue();
+  }
 }
 
 // ---------- Input ----------
@@ -2980,6 +3043,15 @@ input.addEventListener("keydown", (ev) => {
 
 $("#form").addEventListener("submit", (ev) => {
   ev.preventDefault();
+  // Chat baru masih dibuka (restoreSession belum selesai): state.sessionId
+  // masih chat lama — tanpa guard ini, ownRunId() di bawah mengira tombol
+  // ditekan di chat lama dan menghentikan run-nya (laporan pemilik
+  // 28 Nov 2026: chat 1 berhenti saat kasih kerjaan ke chat 2). Teks
+  // tetap di composer; kirim lagi setelah chat terbuka.
+  if (state.switching) {
+    toast("Tunggu sebentar — chat masih dibuka.");
+    return;
+  }
   // Run di chat ini: tombol berfungsi sebagai Stop. Run di chat lain:
   // kirim seperti biasa — langsung jalan bareng (atau masuk antrean bila
   // slot penuh, start() yang mengurusnya).
@@ -3032,9 +3104,9 @@ fetch("/api/config")
           : [];
     loadPrefs();
     applySessionModel(); // model layar awal (atau pilihan lama layar awal)
-    $("#stModel").textContent = state.curModel ?? "belum dikonfigurasi";
-    if (!state.curModel)
-      $("#modelLabel").textContent = "LLM belum dikonfigurasi";
+    // #stModel + #modelLabel sudah diurus updateModelLabel() di dalam
+    // applySessionModel — jangan timpa di sini (dulu: "belum dikonfigurasi"
+    // menimpa "Pilih model dulu", dan #stModel tidak pernah diperbarui lagi).
     setMeters(0, 0);
   })
   .catch(() => {

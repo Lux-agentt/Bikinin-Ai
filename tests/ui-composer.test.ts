@@ -623,7 +623,11 @@ describe("antrean pesan saat run jalan di chat lain", () => {
     expect(js).toContain(
       "const ownRun = ownRunId() !== null || state.starting;",
     );
-    expect(js).toContain("input.disabled = ownRun;");
+    // Input terkunci hanya oleh run chat sendiri — atau selagi pindah chat
+    // belum selesai (state.switching, 28 Nov 2026: kirim saat pindah
+    // menghentikan run chat lama). Run di chat lain tidak mengunci.
+    expect(js).toContain("input.disabled = ownRun || state.switching;");
+    expect(js).toContain("switching: false,");
     expect(js).not.toMatch(/input\.disabled = on;/);
   });
 
