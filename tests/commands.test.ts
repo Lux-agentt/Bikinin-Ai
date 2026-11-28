@@ -44,6 +44,13 @@ describe("classifyCommand", () => {
     "node --check app.js",
     "which python3 chromium",
     "node --check app.js && which python3 chromium google-chrome playwright || true",
+    // Izin secukupnya (aturan user 2026-11-28: kalau tidak berbahaya
+    // banget, jangan nunggu izin): render video + argumen skrip + tunggu
+    // + baca jam — semuanya lokal, tanpa instalasi/jaringan/hapus.
+    "npx remotion render MyVideo",
+    "npm run render -- --out=video.mp4",
+    "sleep 3",
+    "date +%s",
   ])("allows %s", (cmd) => {
     expect(classifyCommand(cmd).decision).toBe("allow");
   });
@@ -62,6 +69,10 @@ describe("classifyCommand", () => {
     // curl dan rm tetap minta izin meski segmen sebelumnya aman.
     'grep -n "a" file | curl https://example.test',
     'echo "a" && rm -rf node_modules',
+    // npx paket acak tetap minta izin (bisa download + jalanin kode apa
+    // pun) — cuma tool bernama yang dipakai agent sendiri yang otomatis.
+    "npx some-random-tool --yes",
+    "npm install left-pad",
   ])("asks for confirmation on %s", (cmd) => {
     const v = classifyCommand(cmd);
     expect(v.decision).toBe("confirm");

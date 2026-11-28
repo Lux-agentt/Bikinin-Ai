@@ -26,6 +26,7 @@ const state = {
   runSessions: new Map(), // runId -> sessionId (balik dari runs, untuk memilah kejadian)
   lastRunId: null, // run terakhir di chat yang dibuka (untuk tombol Lanjutkan)
   approvalRunId: null, // run pemilik persetujuan yang sedang dibuka
+  pendingApproval: null, // { req, runId } — izin menunggu jawaban; TIDAK dibuka otomatis saat pindah/refresh chat (aturan user 2026-11-28: lembar izin muncul tiap pindah chat) — label bar proses menunjukkan "Menunggu izin", ketuk label untuk membuka lembarnya
   sessionId: null,
   queue: [], // antrean pesan { sessionId, message, files, noteEl } — dikirim saat slot run penuh, jalan otomatis begitu ada slot kosong
   starting: false, // start()/resumeRun() sedang upload + POST (kunci ganda sebelum run tercatat)
@@ -1236,6 +1237,13 @@ function addThink(label) {
     const collapsed = block.classList.toggle("collapsed");
     toggle.setAttribute("aria-expanded", String(!collapsed));
   });
+  // Ketuk label saat run menunggu izin -> buka lembar persetujuan yang
+  // tertunda (lembar itu TIDAK dibuka otomatis saat pindah/refresh chat).
+  labelEl.addEventListener("click", () => {
+    if (state.pendingApproval) {
+      openApproval(state.pendingApproval.req, state.pendingApproval.runId);
+    }
+  });
   // Kayak Z.ai (tampilan saat kerja BARU dikasih, bukan saat selesai):
   // blok mulai terlipat — yang kelihatan saat run jalan cuma satu baris
   // (langkah terakhir + timer). Detail langkah + panel kode ada di
@@ -1389,6 +1397,12 @@ function thinkLine(callId, text) {
 function updateThinkHeader() {
   const t = state.think;
   if (!t || t.count === 0) return;
+  // Run menunggu izin: labelnya bilang begitu (bukan "Bekerja") supaya
+  // pengguna tahu kenapa run diam — ketuk label untuk membuka lembar izin.
+  if (state.pendingApproval) {
+    t.labelEl.textContent = "Menunggu izin · ketuk untuk menjawab";
+    return;
+  }
   const eta = computeEtaMin();
   t.labelEl.textContent =
     "Bekerja · " +
@@ -1415,6 +1429,7 @@ function computeEtaMin() {
 
 function finishThink(status, steps) {
   clearInterval(state.timerInt);
+  state.pendingApproval = null;
   const t = state.think;
   if (!t) return;
   t.timer.textContent =
@@ -1971,6 +1986,7 @@ function openApproval(e, runId) {
 function closeApproval() {
   state.approvalId = null;
   state.approvalRunId = null;
+  state.pendingApproval = null;
   $("#approveSheet").hidden = true;
 }
 
@@ -2182,6 +2198,17 @@ function handle(e) {
       if (!state.explainEl && e.summary && e.status !== "error") {
         renderMarkdown(explainBox(), e.summary);
       }
+      // Bebaskan slot SEBELUM jeda replay: run_finished yang datang saat
+      // memutar ulang riwayat (mis. run selesai selagi halaman di-refresh
+      // atau EventSource putus lalu tersambung lagi) sebelumnya berhenti di
+      // `if (state.replaying) break` dan tidak pernah sampai ke
+      // finishRunLive — run tetap tercatat di peta sibuk, input terkunci
+      // dan tombol kirim tidak kembali jadi Kirim walau agent sudah
+      // selesai (laporan user 2026-11-28). Untrack itu idempotent, jadi
+      // pemanggilan ganda (di sini + di finishRunLive) aman.
+      untrackRun(e.run_id);
+      refreshBusyUI();
+      drainQueue();
       if (state.replaying) break;
       renderDiffs();
       void finishRunLive(e);
@@ -2658,6 +2685,7 @@ async function restoreSession(sessionId) {
   closeOverlay();
   state.sessionId = detail.session_id;
   state.lastRunId = null;
+  state.pendingApproval = null; // izin tertunda milik chat lama — diisi lagi di bawah bila chat ini yang punya
   // Blok think tampilan lama ikut terlepas dari DOM — lepas referensinya
   // supaya replay membangun blok baru untuk chat ini.
   state.think = null;
@@ -2701,9 +2729,11 @@ async function restoreSession(sessionId) {
       void reattachRun(detail.session_id, liveRun.run_id);
     }
     // Persetujuan yang masih menggantung (run menunggu jawaban saat halaman
-    // di-refresh): buka lagi lembarnya — kalau tidak, run diam selamanya
-    // menunggu jawaban yang tidak bisa diberikan, dan dari sisi pengguna
-    // agent "berhenti" tiap kali refresh.
+    // di-refresh / chat dibuka lagi): JANGAN buka lembarnya otomatis —
+    // aturan user 2026-11-28, lembar itu muncul tiap pindah chat dan
+    // mengganggu. Simpan sebagai izin tertunda: label bar proses
+    // menunjukkan "Menunggu izin", ketuk label untuk membuka lembarnya.
+    // Run tetap menunggu jawaban; tidak ada yang dijawab diam-diam.
     if (liveRun) {
       const evs = liveRun.events;
       const req = [...evs]
@@ -2716,7 +2746,13 @@ async function restoreSession(sessionId) {
             e.type === "approval_resolved" &&
             e.approval_id === req.approval_id,
         );
-      if (req && !resolved) openApproval(req, liveRun.run_id);
+      if (req && !resolved) {
+        state.pendingApproval = { req, runId: liveRun.run_id };
+        if (state.think)
+          state.think.labelEl.textContent =
+            "Menunggu izin · ketuk untuk menjawab";
+        toast("Run ini menunggu izin — ketuk bar proses untuk menjawab.");
+      }
     }
   }
   // One version per run; content is the current workspace file (older runs were

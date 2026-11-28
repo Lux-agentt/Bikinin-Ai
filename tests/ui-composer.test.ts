@@ -223,6 +223,46 @@ describe("refresh tidak membuat run hilang (pindai semua sesi)", () => {
   });
 });
 
+describe("izin tertunda tidak dibuka otomatis saat pindah chat", () => {
+  // Aturan user 2026-11-28: lembar izin muncul tiap pindah chat. Sekarang
+  // restore cuma menyimpan izin tertunda + label "Menunggu izin"; lembar
+  // baru dibuka kalau pengguna mengetuk label bar proses.
+  it("restore menyimpan pendingApproval, bukan openApproval", () => {
+    expect(js).toContain(
+      "state.pendingApproval = { req, runId: liveRun.run_id };",
+    );
+    expect(js).not.toContain(
+      "if (req && !resolved) openApproval(req, liveRun.run_id);",
+    );
+  });
+
+  it("label bar proses menunjukkan 'Menunggu izin' saat ada izin tertunda", () => {
+    expect(js).toContain(
+      't.labelEl.textContent = "Menunggu izin · ketuk untuk menjawab";',
+    );
+  });
+
+  it("ketuk label membuka lembar izin yang tertunda", () => {
+    expect(js).toContain('labelEl.addEventListener("click", () => {');
+    expect(js).toContain(
+      "openApproval(state.pendingApproval.req, state.pendingApproval.runId);",
+    );
+  });
+
+  it("izin tertunda dibersihkan saat run selesai / lembar ditutup", () => {
+    expect(js).toContain("state.pendingApproval = null;");
+  });
+
+  it("run_finished membebaskan slot SEBELUM jeda replay (tombol tidak nyangkut)", () => {
+    // Regresi 2026-11-28: run_finished yang diputar ulang berhenti di
+    // `if (state.replaying) break` sebelum finishRunLive — run tetap
+    // tercatat, input terkunci walau agent sudah selesai.
+    expect(js).toMatch(
+      /case "run_finished": \{[\s\S]*?untrackRun\(e\.run_id\);[\s\S]*?refreshBusyUI\(\);[\s\S]*?drainQueue\(\);[\s\S]*?if \(state\.replaying\) break;/,
+    );
+  });
+});
+
 describe("prompt to-the-point (agent cepat, tidak bertele-tele)", () => {
   it("rencana maks 3 langkah dan hanya diperbarui kalau berubah", () => {
     expect(prompt).toContain("maks 3 langkah");
@@ -408,12 +448,20 @@ describe("pindah chat bolak-balik (riwayat / Tab Baru)", () => {
       'if (state.think && !liveRun) finishThink("stopped", state.think.count);',
     );
     expect(js).toContain("void reattachRun(detail.session_id, liveRun.run_id);");
-    // Persetujuan yang menggantung dibuka lagi setelah restore, kalau
-    // tidak run diam selamanya menunggu jawaban.
+    // Persetujuan yang menggantung TIDAK dibuka otomatis setelah restore
+    // (aturan user 2026-11-28: lembar izin muncul tiap pindah chat) —
+    // disimpan sebagai izin tertunda; label bar proses menunjukkan
+    // "Menunggu izin", ketuk label baru lembarnya kebuka. Run tetap
+    // menunggu jawaban; tidak ada yang dijawab diam-diam.
     expect(js).toContain(
       'find((e) => e.type === "approval_requested")',
     );
-    expect(js).toContain("if (req && !resolved) openApproval(req, liveRun.run_id);");
+    expect(js).toContain(
+      "state.pendingApproval = { req, runId: liveRun.run_id };",
+    );
+    expect(js).not.toContain(
+      "if (req && !resolved) openApproval(req, liveRun.run_id);",
+    );
     // openApproval menerima run_id eksplisit: kejadian riwayat tidak
     // membawa run_id, dan ownRunId() masih null saat reattach belum
     // selesai — tanpa ini jawabannya selalu ditolak "sudah tidak aktif".
@@ -613,7 +661,10 @@ describe("antrean pesan saat run jalan di chat lain", () => {
 
   it("pindah/buka chat menyegarkan tombol/input + menjalankan antrean", () => {
     expect(js).toContain("refreshBusyUI();");
-    expect(js.match(/drainQueue\(\);/g)).toHaveLength(7);
+    // 8 titik: run_finished juga menjalankan antrean SEBELUM jeda replay
+    // (perbaikan tombol nyangkut 2026-11-28) — slot yang dibebaskan di
+    // situ harus langsung dipakai antrean, bukan menunggu finishRunLive.
+    expect(js.match(/drainQueue\(\);/g)).toHaveLength(8);
   });
 
   it("CSS catatan antrean ada", () => {

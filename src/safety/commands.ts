@@ -213,20 +213,25 @@ function splitSegments(cmd: string): string[] {
 }
 
 const ALLOWED: RegExp[] = [
-  /^npm (run [\w:.-]+|test|--version|-v)$/,
-  /^npx (tsc|vitest|tsx|prettier)( .*)?$/,
+  /^npm (run [\w:.-]+( -- .*)?|test|--version|-v)$/,
+  // npx hanya tool bernama yang dipakai agent sendiri (bukan paket acak —
+  // npx <paket-acak> bisa download + jalanin kode apa pun, tetap confirm).
+  // remotion = CLI video agent (Fase 3); render video memakainya terus.
+  /^npx (tsc|vitest|tsx|prettier|remotion)( .*)?$/,
   /^tsc( .*)?$/,
   /^node (--check )?[\w./-]+\.(m?js|ts)( .*)?$/,
-  /^(ls|pwd|cat|head|tail|wc|grep|echo|mkdir)( .*)?$/,
+  /^(ls|pwd|cat|head|tail|wc|grep|echo|mkdir|date)( .*)?$/,
   /^sed -n( .*)?$/,
   /^python3? [\w./-]+\.py( .*)?$/,
   /^find (?!.*-(delete|exec|execdir|ok)(\s|$)).*$/,
   /^(cp|mv|touch|diff)( .*)?$/,
   // `cd` hanya relatif (aturan BLOCKED memagari .. dan path absolut
   // duluan); `which` hanya membaca; `true`/`false` no-op (`|| true`).
+  // `sleep N` cuma menunggu; `date` cuma membaca jam.
   /^cd( [\w./-]+)?$/,
   /^which [\w./-]+( [\w./-]+)*$/,
   /^(true|false)$/,
+  /^sleep \d+$/,
 ];
 
 export function classifyCommand(command: string): Verdict {
