@@ -967,6 +967,11 @@ main::-webkit-scrollbar {
   text-overflow: ellipsis;
   color: #cbd5e8;
 }
+/* Selesai harus langsung kelihatan beda dari "Bekerja": label jadi
+   seterang teks utama (saat jalan label meredup + shimmer). */
+.think-block.done .think-label {
+  color: var(--text);
+}
 .think-label.shimmer {
   background: linear-gradient(
     90deg,

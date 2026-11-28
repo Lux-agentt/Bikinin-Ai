@@ -1343,13 +1343,14 @@ function thinkLine(callId, text) {
 }
 
 /** Header blok proses kayak Z.ai ("Explored N files, Ran N commands"):
- * begitu ada langkah, label jadi hitungan file + perintah, bukan lagi
- * langkah terakhir. Sebelum langkah pertama, label tetap
- * "Menyusun rencana…". */
+ * begitu ada langkah, label jadi hitungan file + perintah, diawali kata
+ * "Bekerja" supaya status jalan vs selesai langsung kelihatan dalam
+ * satu baris — sebelumnya label cuma hitungan, jadi mirip ringkasan
+ * selesai. Sebelum langkah pertama, label tetap "Menyusun rencana…". */
 function updateThinkHeader() {
   const t = state.think;
   if (!t || t.count === 0) return;
-  t.labelEl.textContent = `${t.files.size} file · ${t.count} perintah`;
+  t.labelEl.textContent = `Bekerja · ${t.files.size} file · ${t.count} perintah`;
 }
 
 function finishThink(status, steps) {
@@ -1363,7 +1364,7 @@ function finishThink(status, steps) {
     t.block.remove(); // a plain chat answer needs no "steps" block
   } else {
     const labels = {
-      completed: `Selesai · ${steps} langkah`,
+      completed: `Selesai ✓ · ${steps} langkah`,
       stopped: "Dihentikan pengguna",
       budget_exceeded: "Berhenti: batas tercapai",
       error: "Berhenti karena error",

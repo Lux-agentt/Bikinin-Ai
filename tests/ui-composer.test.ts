@@ -357,9 +357,16 @@ describe("drawer kosong disembunyikan + header proses kayak Z.ai", () => {
 
   it("header menampilkan hitungan file + perintah, bukan langkah terakhir", () => {
     expect(js).toContain("function updateThinkHeader()");
-    expect(js).toContain("} file · ${t.count} perintah");
+    // Status jalan vs selesai harus langsung kelihatan: "Bekerja · …"
+    // saat run jalan, "Selesai ✓ · …" saat run berakhir.
+    expect(js).toContain("Bekerja · ${t.files.size} file · ${t.count} perintah");
+    expect(js).toContain("Selesai ✓ · ${steps} langkah");
     expect(js).toContain("files: new Set()");
     expect(js).toContain('t.files.add(rest.join(" "))');
+  });
+
+  it("label selesai tampil lebih terang dari label saat bekerja", () => {
+    expect(css).toMatch(/\.think-block\.done \.think-label \{[^}]*color: var\(--text\)/);
   });
 
   it("daftar langkah tampil sebagai pohon (garis + titik)", () => {
