@@ -175,6 +175,7 @@ async function servePreview(
 }
 
 async function serveDownload(
+  req: IncomingMessage,
   res: ServerResponse,
   workspace: string,
   rawPath: string,
@@ -208,23 +209,61 @@ async function serveDownload(
   // ini browser mengunduh. Default tetap attachment supaya tombol Unduh
   // di tab Files tidak berubah perilakunya.
   const disposition = inline ? "inline" : "attachment";
-  res.writeHead(200, {
+  const baseHeaders = {
     "Content-Type":
       MIME[extname(abs).toLowerCase()] ?? "application/octet-stream",
     "Content-Disposition": `${disposition}; filename="${filename}"`,
-    "Content-Length": String(st.size),
+    "Accept-Ranges": "bytes",
     "Cache-Control": "no-store",
     ...SECURITY_HEADERS,
-  });
-  await new Promise<void>((resolve) => {
-    const stream = createReadStream(abs);
-    stream.on("error", () => {
-      if (!res.writableEnded) res.destroy();
-      resolve();
+  };
+  const streamRange = (start: number, end: number) =>
+    new Promise<void>((resolve) => {
+      const stream = createReadStream(abs, { start, end });
+      stream.on("error", () => {
+        if (!res.writableEnded) res.destroy();
+        resolve();
+      });
+      stream.on("end", resolve);
+      stream.pipe(res);
     });
-    stream.on("end", resolve);
-    stream.pipe(res);
+  // Range: player video (terutama Safari HP) meminta potongan file supaya
+  // bisa mulai memutar + seek tanpa menunggu seluruh file. Tanpa ini,
+  // tekan play terasa lag walau file-nya kecil (laporan pemilik 28 Nov 2026).
+  const range = req.headers.range;
+  const m = range ? /^bytes=(\d*)-(\d*)$/.exec(range.trim()) : null;
+  if (m && (m[1] !== "" || m[2] !== "")) {
+    const size = st.size;
+    let start = m[1] === "" ? size - Number(m[2]) : Number(m[1]);
+    let end = m[2] === "" ? size - 1 : Number(m[2]);
+    if (end >= size) end = size - 1;
+    if (
+      Number.isNaN(start) ||
+      Number.isNaN(end) ||
+      start < 0 ||
+      end < start ||
+      start >= size
+    ) {
+      res.writeHead(416, {
+        ...baseHeaders,
+        "Content-Range": `bytes */${size}`,
+      });
+      res.end();
+      return;
+    }
+    res.writeHead(206, {
+      ...baseHeaders,
+      "Content-Range": `bytes ${start}-${end}/${size}`,
+      "Content-Length": String(end - start + 1),
+    });
+    await streamRange(start, end);
+    return;
+  }
+  res.writeHead(200, {
+    ...baseHeaders,
+    "Content-Length": String(st.size),
   });
+  await streamRange(0, st.size - 1);
 }
 
 function streamEvents(
@@ -422,6 +461,7 @@ async function route(
       const rawPath = url.searchParams.get("path");
       if (!rawPath) throw new HttpError(400, "path tidak diberikan");
       return serveDownload(
+        req,
         res,
         workspace,
         rawPath,

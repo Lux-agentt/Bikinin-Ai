@@ -1096,6 +1096,42 @@ describe("web server", () => {
       new Uint8Array(video),
     );
 
+    // Range: player video (terutama Safari HP) meminta potongan file.
+    expect(dl.headers.get("accept-ranges")).toBe("bytes");
+    const r0 = await fetch(
+      `${url}/api/sessions/${session_id}/download?path=${encodeURIComponent("out/video.mp4")}`,
+      { headers: { Range: "bytes=0-9" } },
+    );
+    expect(r0.status).toBe(206);
+    expect(r0.headers.get("content-range")).toBe(
+      `bytes 0-9/${video.length}`,
+    );
+    expect(r0.headers.get("content-length")).toBe("10");
+    expect(new Uint8Array(await r0.arrayBuffer())).toEqual(
+      new Uint8Array(video.subarray(0, 10)),
+    );
+    // Range terbuka: dari byte 5 sampai akhir file.
+    const r1 = await fetch(
+      `${url}/api/sessions/${session_id}/download?path=${encodeURIComponent("out/video.mp4")}`,
+      { headers: { Range: "bytes=5-" } },
+    );
+    expect(r1.status).toBe(206);
+    expect(r1.headers.get("content-range")).toBe(
+      `bytes 5-${video.length - 1}/${video.length}`,
+    );
+    expect(new Uint8Array(await r1.arrayBuffer())).toEqual(
+      new Uint8Array(video.subarray(5)),
+    );
+    // Range di luar file: 416.
+    const rBad = await fetch(
+      `${url}/api/sessions/${session_id}/download?path=${encodeURIComponent("out/video.mp4")}`,
+      { headers: { Range: "bytes=999999-" } },
+    );
+    expect(rBad.status).toBe(416);
+    expect(rBad.headers.get("content-range")).toBe(
+      `bytes */${video.length}`,
+    );
+
     // No 5 MB cap here (unlike the zip): a 6 MB file streams out fine.
     const bigDl = await fetch(
       `${url}/api/sessions/${session_id}/download?path=big.bin`,
