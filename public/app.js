@@ -42,6 +42,7 @@ const state = {
   explainRaw: "",
   files: new Map(), // path -> { bytes }
   pendingFiles: [], // File[] chosen via + button, uploaded when the run starts
+  drafts: new Map(), // sessionId (null = layar awal) -> { text, files } — draf ketikan + lampiran per chat
   versions: [], // { path, bytes, title, content: string|null, runId }
   activeVersion: -1,
   evalSelected: null, // Set<string> | null — tugas eval yang dicentang (null = semua)
@@ -2360,6 +2361,11 @@ function queueMessage(sessionId, message) {
 // Jalankan antrean pertama untuk chat yang sedang dibuka (kalau ada slot kosong).
 function drainQueue() {
   if (state.runs.size >= MAX_PARALLEL || state.starting) return;
+  // Satu sesi cuma satu run — antrean chat ini baru jalan setelah run chat
+  // ini selesai. Jangan ambil pesannya dari antrean sebelum itu: start()
+  // akan menolaknya karena ownRunId() dan pesannya hilang begitu saja
+  // (bug 28 Nov 2026: pesan antrean lenyap setelah run pertama jalan).
+  if (ownRunId()) return;
   const i = state.queue.findIndex((e) => e.sessionId === state.sessionId);
   if (i < 0) return;
   const [entry] = state.queue.splice(i, 1);
@@ -2441,7 +2447,14 @@ async function reattachLiveRun() {
 async function start(message, opts = {}) {
   // Satu sesi cuma boleh satu run aktif; slot global maks MAX_PARALLEL —
   // run ke-4 masuk antrean, bukan ditolak diam-diam.
-  if (!message || ownRunId() || state.starting) return;
+  if (!message || ownRunId()) return;
+  if (state.starting) {
+    // Kirim lain (biasanya dari chat lain) sedang upload + POST — antrekan
+    // saja, jangan buang pesannya diam-diam (bug 28 Nov 2026: pesan hilang
+    // saat pindah chat lalu kirim selagi start() chat lama belum selesai).
+    queueMessage(state.sessionId, message);
+    return;
+  }
   if (state.runs.size >= MAX_PARALLEL) {
     queueMessage(state.sessionId, message);
     return;
@@ -2642,10 +2655,33 @@ async function resumeRun() {
   }
 }
 
+// Draf ketikan + lampiran disimpan per chat (28 Nov 2026): composer itu
+// satu untuk semua chat — tanpa ini, ketikan/lampiran di chat A ikut
+// terkirim saat pengguna kirim pesan di chat B.
+function saveDraft() {
+  const text = input.value;
+  const files = state.pendingFiles;
+  if (text !== "" || files.length > 0) {
+    state.drafts.set(state.sessionId, { text, files: [...files] });
+  } else {
+    state.drafts.delete(state.sessionId);
+  }
+}
+
+function loadDraft() {
+  const d = state.drafts.get(state.sessionId);
+  input.value = d ? d.text : "";
+  state.pendingFiles = d ? [...d.files] : [];
+  autoGrow();
+  renderAttachments();
+  updateSendState();
+}
+
 function resetSession() {
   // Boleh kembali ke layar awal selagi run jalan — run lanjut di latar
   // (server boleh jalanin sampai 3 run bareng; kirim baru langsung jalan
   // bila ada slot, antre bila penuh).
+  saveDraft();
   closeOverlay();
   closeFolderSheet();
   clearInterval(state.timerInt);
@@ -2663,9 +2699,7 @@ function resetSession() {
   state.explainEl = null;
   state.explainRaw = "";
   setMeters(0, 0);
-  input.value = "";
-  autoGrow();
-  updateSendState();
+  loadDraft(); // draf layar awal (biasanya kosong) — lampiran chat lama tidak ikut
   updateRevBar();
   paintFolders();
   syncFolderPreviews();
@@ -2681,6 +2715,7 @@ function resetSession() {
 }
 
 async function restoreSession(sessionId) {
+  saveDraft(); // simpan draf chat lama di bawah sesi lama, sebelum pindah
   // Boleh pindah chat selagi run jalan — run lanjut di latar; saat chat
   // ini dibuka lagi, sambung ke stream run-nya bila masih hidup
   // (reattachRun), supaya kejadian live tetap tertempel dan refresh tidak
@@ -2752,7 +2787,12 @@ async function restoreSession(sessionId) {
     // menawarkannya lagi di tiap kunjungan (bug 28 Nov 2026).
     if (liveRun) {
       const alive = await probeRunAlive(liveRun.run_id);
-      if (alive === "dead") {
+      // Pengguna bisa pindah chat selagi probe jalan — jangan sentuh UI
+      // chat lain: izin tertunda + label bar proses milik chat yang dibuka
+      // saat probe selesai, bukan chat ini.
+      if (state.sessionId !== detail.session_id) {
+        // Biarkan chat baru yang urus UI-nya.
+      } else if (alive === "dead") {
         untrackRun(liveRun.run_id);
         if (state.think) finishThink("stopped", state.think.count);
       } else {
@@ -2806,6 +2846,7 @@ async function restoreSession(sessionId) {
   );
   // Segarkan tombol/input untuk chat yang baru dibuka (run di chat lain
   // tidak mengunci input chat ini) + jalankan antrean chat ini bila ada slot.
+  loadDraft(); // draf chat ini (ketikan + lampiran yang sempat ditinggal)
   refreshBusyUI();
   drainQueue();
 }
