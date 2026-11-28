@@ -94,9 +94,17 @@ describe("panel kode live menampilkan rencana + tool yang sedang jalan", () => {
 describe("UI proses run simpel (tidak penuh teks)", () => {
   it("baris langkah hanya label tool — ringkasan tidak ditempel", () => {
     expect(js).not.toContain("— ${e.summary}");
+    expect(js).toMatch(/label\.className = "think-line-text"/);
+  });
+
+  it("langkah menampilkan cuplikan kode satu baris di bawah label", () => {
+    expect(js).toMatch(/function setStepCode\(row, text\)/);
+    expect(js).toMatch(/row\.snippet\.textContent = capText\(first, 140\)/);
     expect(js).toMatch(
-      /case "tool_call_finished":[\s\S]*?row\.line\.textContent = row\.text/,
+      /case "file_changed":[\s\S]*?setStepCode\(row, e\.diff\)/,
     );
+    expect(js).toMatch(/if \(e\.output_preview && !row\.snippetFromDiff\)/);
+    expect(css).toMatch(/\.think-snippet \{[^}]*text-overflow: ellipsis/);
   });
 
   it("panel kode hanya cuplikan pendek, bukan dinding teks", () => {

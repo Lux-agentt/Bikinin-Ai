@@ -1267,15 +1267,48 @@ function formatToolCall(tool, args) {
   return capText(lines.join("\n"), 1500);
 }
 
+/** Baris kode pertama yang bermakna dari sebuah teks (lewati baris kosong
+ *  dan header diff) — untuk cuplikan satu baris di bawah label langkah. */
+function firstCodeLine(text) {
+  for (const raw of String(text ?? "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (
+      line.startsWith("@@") ||
+      line.startsWith("--- ") ||
+      line.startsWith("+++ ") ||
+      line.startsWith("diff ")
+    ) continue;
+    return line;
+  }
+  return "";
+}
+
+/** Isi cuplikan kode satu baris di bawah label langkah (tampil, tapi
+ *  simpel: kecil, meredup, terpotong satu baris dengan …). */
+function setStepCode(row, text) {
+  if (!row || !row.snippet) return;
+  const first = firstCodeLine(text);
+  if (!first) return;
+  row.snippet.textContent = capText(first, 140);
+  row.snippet.hidden = false;
+}
+
 function thinkLine(callId, text) {
   const t = state.think;
   if (!t) return;
   const short = capText(text, 120);
   const line = document.createElement("div");
   line.className = "think-line";
-  line.textContent = short;
+  const label = document.createElement("span");
+  label.className = "think-line-text";
+  label.textContent = short;
+  const snippet = document.createElement("div");
+  snippet.className = "think-snippet";
+  snippet.hidden = true;
+  line.append(label, snippet);
   t.linesEl.appendChild(line);
-  t.rows.set(callId, { line, text: short });
+  t.rows.set(callId, { line, label, text: short, snippet });
   t.count += 1;
   t.labelEl.textContent = short;
   scrollDown();
@@ -1876,6 +1909,12 @@ function handle(e) {
         if (startedBody) {
           showCode(e.tool === "update_plan" ? "Rencana" : e.label, startedBody);
         }
+        // Cuplikan kode di bawah label langkah — tampil tapi simpel.
+        // run_command tidak perlu: labelnya sudah perintahnya sendiri.
+        if (e.tool !== "run_command") {
+          const row = state.think && state.think.rows.get(e.call_id);
+          if (row) setStepCode(row, startedBody);
+        }
       }
       break;
 
@@ -1883,10 +1922,12 @@ function handle(e) {
       const row = state.think && state.think.rows.get(e.call_id);
       if (row) {
         row.line.className = "think-line " + (e.ok ? "ok" : "fail");
-        // Simpel: baris langkah tetap label tool saja — ringkasan (ukuran
-        // file, jumlah karakter, ...) tidak ditempel, biar UI proses tidak
-        // penuh teks.
-        row.line.textContent = row.text;
+        // Label tetap label tool saja (ringkasan ukuran/jumlah tidak
+        // ditempel); kode tampil sebagai cuplikan satu baris di bawah
+        // label — dari output, kecuali sudah ada cuplikan diff.
+        if (e.output_preview && !row.snippetFromDiff) {
+          setStepCode(row, e.output_preview);
+        }
         // Kode/output asli terbaru tampil di panel think. Label tool:
         // run_command "$ <perintah>", read_file "read_file <path>".
         if (
@@ -1909,7 +1950,23 @@ function handle(e) {
 
     case "file_changed":
       state.files.set(e.path, { bytes: e.bytes, diff: e.diff });
-      if (e.diff) showCode(`Diff: ${e.path}`, e.diff);
+      if (e.diff) {
+        showCode(`Diff: ${e.path}`, e.diff);
+        // Cuplikan diff di bawah langkah write/edit file yang bersangkutan.
+        const t = state.think;
+        if (t) {
+          for (const row of [...t.rows.values()].reverse()) {
+            if (
+              row.text === `write_file ${e.path}` ||
+              row.text === `edit_file ${e.path}`
+            ) {
+              setStepCode(row, e.diff);
+              row.snippetFromDiff = true;
+              break;
+            }
+          }
+        }
+      }
       break;
 
     case "verification":
@@ -1955,7 +2012,7 @@ function handle(e) {
       if (row) {
         row.line.className =
           "think-line " + (e.status === "completed" ? "ok" : "fail");
-        row.line.textContent = `Subagent: ${e.task} — ${e.status} (${e.steps} langkah, $${e.cost_usd.toFixed(4)})`;
+        row.label.textContent = `Subagent: ${e.task} — ${e.status} (${e.steps} langkah, $${e.cost_usd.toFixed(4)})`;
       }
       break;
     }
