@@ -911,6 +911,15 @@ main::-webkit-scrollbar {
   border: 1px solid rgba(93, 139, 255, 0.26);
   animation: fadeUp 0.3s cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
+/* Catatan antrean di bawah bubble user — pesan dikirim selagi run lain aktif. */
+.queued-note {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 4px 12px 8px;
+  color: var(--faint);
+  font-size: 11.5px;
+  text-align: right;
+}
 .msg-att {
   display: flex;
   flex-wrap: wrap;

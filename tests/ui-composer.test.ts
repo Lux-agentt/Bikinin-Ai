@@ -385,7 +385,8 @@ describe("drawer kosong disembunyikan + header proses kayak Z.ai", () => {
     expect(js).toContain("function updateThinkHeader()");
     // Status jalan vs selesai harus langsung kelihatan: "Bekerja · …"
     // saat run jalan, "Selesai ✓ · …" saat run berakhir.
-    expect(js).toContain("Bekerja · ${t.files.size} file · ${t.count} perintah");
+    expect(js).toContain('"Bekerja · " +');
+    expect(js).toContain("`${t.files.size} file · ${t.count} perintah`");
     expect(js).toContain("Selesai ✓ · ${steps} langkah");
     expect(js).toContain("files: new Set()");
     expect(js).toContain('t.files.add(rest.join(" "))');
@@ -429,5 +430,90 @@ describe("pindah chat selagi run jalan", () => {
     expect(js).toContain(
       "detail.runs.some((r) => r.run_id === state.runId)",
     );
+  });
+});
+
+describe("antrean pesan saat run jalan di chat lain", () => {
+  it("input tidak dikunci saat run aktif di chat lain (hanya run sendiri yang mengunci)", () => {
+    expect(js).toContain("queue: [],");
+    expect(js).toContain(
+      "const ownRun = on && state.runSessionId === state.sessionId;",
+    );
+    expect(js).toContain("input.disabled = ownRun;");
+    expect(js).not.toMatch(/input\.disabled = on;/);
+  });
+
+  it("kirim saat run lain aktif masuk antrean, bukan menghentikan run itu", () => {
+    expect(js).toContain(
+      "if (state.busy && state.runSessionId === state.sessionId) {",
+    );
+    expect(js).toContain("queueMessage(state.sessionId, text);");
+    expect(js).toContain('note.className = "queued-note";');
+    expect(js).toContain(
+      "Menunggu giliran — jalan otomatis setelah run di chat lain selesai.",
+    );
+  });
+
+  it("drainQueue menjalankan antrean pertama untuk chat yang dibuka", () => {
+    expect(js).toContain("function drainQueue() {");
+    expect(js).toContain(
+      "const i = state.queue.findIndex((e) => e.sessionId === state.sessionId);",
+    );
+    expect(js).toContain(
+      "void start(entry.message, { alreadyShown: true });",
+    );
+    expect(js).toContain("if (!opts.alreadyShown) {");
+  });
+
+  it("run selesai (sendiri maupun latar) menjalankan antrean", () => {
+    expect(js).toMatch(
+      /async function finishRunLive[\s\S]*?setBusy\(false\)[\s\S]*?drainQueue\(\)/,
+    );
+    expect(js).toMatch(
+      /drainQueue\(\);[\s\S]{0,120}?toast\("Agent selesai bekerja di chat lain\."\)/,
+    );
+  });
+
+  it("pindah/buka chat menyegarkan tombol/input + menjalankan antrean", () => {
+    expect(js).toContain("setBusy(state.busy);");
+    expect(js.match(/drainQueue\(\);/g)).toHaveLength(6);
+  });
+
+  it("CSS catatan antrean ada", () => {
+    expect(css).toContain(".queued-note {");
+  });
+});
+
+describe("perkiraan selesai (ETA menit)", () => {
+  it("ETA dihitung dari kecepatan rencana, bukan batas langkah", () => {
+    expect(js).toContain("function computeEtaMin() {");
+    expect(js).toContain("state.planItems = items;");
+    expect(js).toContain(
+      'items.filter((it) => it.status === "done").length',
+    );
+    expect(js).toContain(
+      "Math.max(1, Math.round(((elapsed / done) * remaining) / 60))",
+    );
+  });
+
+  it("ETA tampil di label Bekerja (di depan hitungan supaya tidak kepotong)", () => {
+    expect(js).toContain("const eta = computeEtaMin();");
+    expect(js).toContain("`±${eta} mnt · `");
+  });
+
+  it("tanpa dasar (belum ada rencana / belum ada langkah selesai) ETA tidak tampil", () => {
+    expect(js).toMatch(
+      /function computeEtaMin\(\) \{[\s\S]*?if \(done === 0\) return null;/,
+    );
+    expect(js).toMatch(
+      /function computeEtaMin\(\) \{[\s\S]*?if \(remaining <= 0\) return null;/,
+    );
+  });
+
+  it("timer memperbarui ETA tiap tick + rencana baru dibersihkan tiap run", () => {
+    expect(js).toMatch(
+      /state\.timerInt = setInterval\(\(\) => \{[\s\S]*?updateThinkHeader\(\);/,
+    );
+    expect(js).toContain("state.planItems = null;");
   });
 });

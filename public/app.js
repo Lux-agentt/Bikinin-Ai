@@ -23,6 +23,7 @@ const state = {
   runId: null,
   runSessionId: null, // sesi pemilik run yang sedang aktif (bisa beda dari sessionId saat pengguna pindah chat selagi run jalan)
   sessionId: null,
+  queue: [], // antrean pesan { sessionId, message, files, noteEl } — dikirim selagi run lain aktif, jalan otomatis setelah run itu selesai
   source: null,
   busy: false,
   replaying: false,
@@ -30,6 +31,7 @@ const state = {
   approvalId: null,
   think: null, // { block, labelEl, timer, linesEl, rows: Map, count }
   planEl: null, // Todo panel (Fase 5), rendered from plan_updated events
+  planItems: null, // langkah rencana terakhir (untuk perkiraan menit selesai)
   lastThink: null, // finished think block, for the resume button
   explainEl: null,
   explainRaw: "",
@@ -123,13 +125,17 @@ function updateSendState() {
 
 function setBusy(on) {
   state.busy = on;
-  sendBtn.classList.toggle("stop", on);
+  // Run di chat lain tidak mengunci chat ini: input tetap hidup supaya
+  // pengguna bisa kirim (pesannya masuk antrean), dan tombolnya tetap
+  // Kirim — Stop hanya untuk run di chat yang sedang dibuka.
+  const ownRun = on && state.runSessionId === state.sessionId;
+  sendBtn.classList.toggle("stop", ownRun);
   const icon = $("#tplIcons").content.querySelector(
-    `[data-ic="${on ? "stop" : "send"}"]`,
+    `[data-ic="${ownRun ? "stop" : "send"}"]`,
   );
   sendBtn.replaceChildren(icon.firstElementChild.cloneNode(true));
-  sendBtn.setAttribute("aria-label", on ? "Hentikan agent" : "Kirim");
-  input.disabled = on;
+  sendBtn.setAttribute("aria-label", ownRun ? "Hentikan agent" : "Kirim");
+  input.disabled = ownRun;
   updateSendState();
   if (!on) input.focus();
 }
@@ -1211,6 +1217,9 @@ function addThink(label) {
   state.timerInt = setInterval(() => {
     timer.textContent =
       ((Date.now() - state.startedAt) / 1000).toFixed(1) + "s";
+    // Perkiraan selesai ikut bergerak seiring waktu (bukan cuma saat ada
+    // langkah baru) — kalau satu langkah lama, angkanya naik juga.
+    updateThinkHeader();
   }, 100);
   state.think = {
     block,
@@ -1341,11 +1350,34 @@ function thinkLine(callId, text) {
  * begitu ada langkah, label jadi hitungan file + perintah, diawali kata
  * "Bekerja" supaya status jalan vs selesai langsung kelihatan dalam
  * satu baris — sebelumnya label cuma hitungan, jadi mirip ringkasan
- * selesai. Sebelum langkah pertama, label tetap "Menyusun rencana…". */
+ * selesai. Sebelum langkah pertama, label tetap "Menyusun rencana…".
+ * Perkiraan selesai (±N mnt, dari kecepatan rencana) tampil di depan
+ * hitungan supaya tidak kepotong ellipsis di layar sempit. */
 function updateThinkHeader() {
   const t = state.think;
   if (!t || t.count === 0) return;
-  t.labelEl.textContent = `Bekerja · ${t.files.size} file · ${t.count} perintah`;
+  const eta = computeEtaMin();
+  t.labelEl.textContent =
+    "Bekerja · " +
+    (eta === null ? "" : `±${eta} mnt · `) +
+    `${t.files.size} file · ${t.count} perintah`;
+}
+
+/** Perkiraan menit sampai run selesai, dari kecepatan rencana: waktu yang
+ *  sudah jalan dibagi langkah rencana yang selesai, dikali langkah yang
+ *  tersisa. Null bila belum ada dasarnya (rencana belum ada / belum ada
+ *  langkah selesai / rencana sudah habis) — jangan mengarang angka.
+ *  Bukan janji: model gratis kadang melambat, jadi labelnya pakai ±. */
+function computeEtaMin() {
+  const items = state.planItems;
+  if (!Array.isArray(items) || items.length === 0) return null;
+  if (!state.startedAt) return null;
+  const done = items.filter((it) => it.status === "done").length;
+  if (done === 0) return null;
+  const remaining = items.length - done;
+  if (remaining <= 0) return null;
+  const elapsed = (Date.now() - state.startedAt) / 1000;
+  return Math.max(1, Math.round(((elapsed / done) * remaining) / 60));
 }
 
 function finishThink(status, steps) {
@@ -1383,6 +1415,7 @@ function finishThink(status, steps) {
 // ---------- Fase 5: Todo panel (plan_updated) ----------
 
 function renderPlan(items) {
+  state.planItems = items;
   let panel = state.planEl;
   if (!panel) {
     panel = document.createElement("div");
@@ -1946,6 +1979,7 @@ function handle(e) {
       state.runId = null;
       state.runSessionId = null;
       setBusy(false);
+      drainQueue();
       syncFolderPreviews();
       toast("Agent selesai bekerja di chat lain.");
     } else if (e.type === "approval_requested") {
@@ -2140,6 +2174,7 @@ async function finishRunLive(e) {
   if (state.source) state.source.close();
   state.source = null;
   setBusy(false);
+  drainQueue();
   syncFolderPreviews();
 }
 
@@ -2197,6 +2232,7 @@ function listen(runId) {
           setBusy(false);
           if (state.think) finishThink("stopped", state.think.count);
           toast("Koneksi ke server putus — run dihentikan, sudah bisa pindah chat.");
+          drainQueue();
         }
       })
       .catch(() => {
@@ -2208,8 +2244,44 @@ function listen(runId) {
   };
 }
 
-async function start(message) {
+// Pesan yang dikirim selagi run lain aktif: simpan + tampilkan sebagai
+// bubble user dengan catatan antrean, lalu jalan otomatis saat gilirannya tiba.
+function queueMessage(sessionId, message) {
+  const files = state.pendingFiles;
+  const names = files.map((f) => f.name);
+  state.pendingFiles = [];
+  renderAttachments();
+  const entry = { sessionId, message, files, noteEl: null };
+  state.queue.push(entry);
+  if (sessionId === state.sessionId) {
+    addUser(names.length > 0 ? `${message}\n📎 ${names.join(", ")}` : message);
+    const note = document.createElement("div");
+    note.className = "queued-note";
+    note.textContent =
+      "Menunggu giliran — jalan otomatis setelah run di chat lain selesai.";
+    main.appendChild(note);
+    scrollDown(true);
+    entry.noteEl = note;
+  }
+  toast("Pesan masuk antrean — jalan otomatis setelah run selesai.");
+}
+
+// Jalankan antrean pertama untuk chat yang sedang dibuka (kalau lagi nganggur).
+function drainQueue() {
+  if (state.busy) return;
+  const i = state.queue.findIndex((e) => e.sessionId === state.sessionId);
+  if (i < 0) return;
+  const [entry] = state.queue.splice(i, 1);
+  if (entry.noteEl && entry.noteEl.isConnected) entry.noteEl.remove();
+  state.pendingFiles = [...state.pendingFiles, ...entry.files];
+  renderAttachments();
+  void start(entry.message, { alreadyShown: true });
+}
+
+async function start(message, opts = {}) {
   if (!message || state.busy) return;
+  const isNewSession = !state.sessionId;
+  state.runSessionId = state.sessionId;
   setBusy(true);
   // Upload first: if it fails, no run starts and the files stay selected.
   let attachmentIds = [];
@@ -2236,12 +2308,16 @@ async function start(message) {
     state.planEl.remove();
     state.planEl = null;
   }
+  state.planItems = null;
   if (heroEl.isConnected) heroEl.remove();
-  addUser(
-    attachedNames.length > 0
-      ? `${message}\n📎 ${attachedNames.join(", ")}`
-      : message,
-  );
+  // Pesan dari antrean sudah tampil sebagai bubble saat dikirim — jangan ganda.
+  if (!opts.alreadyShown) {
+    addUser(
+      attachedNames.length > 0
+        ? `${message}\n📎 ${attachedNames.join(", ")}`
+        : message,
+    );
+  }
   setMeters(0, 0);
   addThink("Menyusun rencana…");
   try {
@@ -2273,9 +2349,16 @@ async function start(message) {
     state.runId = data.run_id;
     state.sessionId = data.session_id;
     state.runSessionId = data.session_id;
+    // Run ini membuat sesi baru (dari layar awal): pesan yang diantre dari
+    // layar awal ikut sesi baru ini, bukan nyangkut tanpa sesi.
+    if (isNewSession) {
+      for (const q of state.queue)
+        if (q.sessionId === null) q.sessionId = data.session_id;
+    }
     listen(data.run_id);
   } catch (err) {
     finishThink("error", 0);
+    state.runSessionId = null;
     setBusy(false);
     addErrorCard(
       "Koneksi ke agent terputus",
@@ -2298,6 +2381,7 @@ async function stopRun() {
       setBusy(false);
       if (state.think) finishThink("stopped", state.think.count);
       toast("Agent sudah berhenti — run tidak ditemukan di server.");
+      drainQueue();
       return;
     }
     toast("Menghentikan agent…");
@@ -2388,6 +2472,10 @@ function resetSession() {
       ? "Sesi direset — agent lanjut bekerja di latar"
       : "Sesi direset ke layar awal",
   );
+  // Segarkan tombol/input untuk layar baru (run di chat lain tidak
+  // mengunci input) + jalankan antrean layar ini bila nganggur.
+  setBusy(state.busy);
+  drainQueue();
 }
 
 async function restoreSession(sessionId) {
@@ -2470,6 +2558,10 @@ async function restoreSession(sessionId) {
       ? "Proyek dibuka — agent lanjut bekerja di latar"
       : "Proyek dibuka dari riwayat",
   );
+  // Segarkan tombol/input untuk chat yang baru dibuka (run di chat lain
+  // tidak mengunci input chat ini) + jalankan antrean chat ini bila nganggur.
+  setBusy(state.busy);
+  drainQueue();
 }
 
 // ---------- Input ----------
@@ -2499,7 +2591,9 @@ input.addEventListener("keydown", (ev) => {
 
 $("#form").addEventListener("submit", (ev) => {
   ev.preventDefault();
-  if (state.busy) {
+  // Run di chat ini: tombol berfungsi sebagai Stop. Run di chat lain:
+  // kirim seperti biasa — pesannya masuk antrean.
+  if (state.busy && state.runSessionId === state.sessionId) {
     void stopRun();
     return;
   }
@@ -2507,6 +2601,10 @@ $("#form").addEventListener("submit", (ev) => {
   if (!text) return;
   input.value = "";
   autoGrow();
+  if (state.busy) {
+    queueMessage(state.sessionId, text);
+    return;
+  }
   void start(text);
 });
 
