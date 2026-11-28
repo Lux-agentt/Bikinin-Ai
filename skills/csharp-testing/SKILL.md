@@ -1,10 +1,10 @@
 ---
 name: csharp-testing
+category: framework
 description: C# and .NET testing patterns with xUnit, FluentAssertions, mocking, integration tests, and test organization best practices. Use when writing or reviewing xUnit tests, mocks, or integration tests in a C# / .NET project.
 metadata:
   origin: ECC
 ---
-
 # C# Testing Patterns
 
 Comprehensive testing patterns for .NET applications using xUnit, FluentAssertions, and modern testing practices.

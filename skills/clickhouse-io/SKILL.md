@@ -1,10 +1,10 @@
 ---
 name: clickhouse-io
+category: backend-api
 description: ClickHouse database patterns, query optimization, analytics, and data engineering best practices for high-performance analytical workloads. Use when writing ClickHouse schemas or queries, or when an analytical query is too slow.
 metadata:
   origin: ECC
 ---
-
 # ClickHouse Analytics Patterns
 
 ClickHouse-specific patterns for high-performance analytics and data engineering.

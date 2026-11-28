@@ -1,10 +1,10 @@
 ---
 name: cpp-testing
+category: framework
 description: Use only when writing/updating/fixing C++ tests, configuring GoogleTest/CTest, diagnosing failing or flaky tests, or adding coverage/sanitizers.
 metadata:
   origin: ECC
 ---
-
 # C++ Testing (Agent Skill)
 
 Agent-focused testing workflow for modern C++ (C++17/20) using GoogleTest/GoogleMock with CMake/CTest.

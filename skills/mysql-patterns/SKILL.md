@@ -1,10 +1,10 @@
 ---
 name: mysql-patterns
+category: backend-api
 description: MySQL and MariaDB schema, query, indexing, transaction, replication, and connection-pool patterns for production backends. Use when designing MySQL or MariaDB schemas and indexes, or when a query, transaction, or replica lags.
 metadata:
   origin: ECC
 ---
-
 # MySQL Patterns
 
 Use this skill when working on MySQL or MariaDB schema design, migrations,

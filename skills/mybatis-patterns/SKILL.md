@@ -1,10 +1,10 @@
 ---
 name: mybatis-patterns
+category: framework
 description: MyBatis and MyBatis-Spring patterns for mapper design, XML and annotation SQL, result mapping, dynamic SQL safety, transactions, batching, pagination, and query performance. Use when building or reviewing Java persistence code with MyBatis, Spring Boot, MyBatis-Spring, or MyBatis-based legacy applications.
 metadata:
   origin: ECC
 ---
-
 # MyBatis Patterns
 
 Use MyBatis when SQL control and explicit mappings matter. Keep SQL readable,

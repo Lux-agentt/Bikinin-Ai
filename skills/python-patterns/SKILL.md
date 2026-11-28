@@ -1,10 +1,10 @@
 ---
 name: python-patterns
+category: framework
 description: Pythonic idioms, PEP 8 standards, type hints, and best practices for building robust, efficient, and maintainable Python applications. Use when writing or reviewing Python code and idiomatic structure, typing, or PEP 8 is in question.
 metadata:
   origin: ECC
 ---
-
 # Python Development Patterns
 
 Idiomatic Python patterns and best practices for building robust, efficient, and maintainable applications.

@@ -1,10 +1,10 @@
 ---
 name: kotlin-patterns
+category: framework
 description: Idiomatic Kotlin patterns, best practices, and conventions for building robust, efficient, and maintainable Kotlin applications with coroutines, null safety, and DSL builders. Use when writing or reviewing Kotlin code and idiomatic structure or null safety is in question.
 metadata:
   origin: ECC
 ---
-
 # Kotlin Development Patterns
 
 Idiomatic Kotlin patterns and best practices for building robust, efficient, and maintainable applications.

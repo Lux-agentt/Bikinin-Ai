@@ -1,10 +1,10 @@
 ---
 name: springboot-patterns
+category: framework
 description: Spring Boot architecture patterns, REST API design, layered services, data access, caching, async processing, and logging. Use for Java Spring Boot backend work. Use when building or reviewing a Spring Boot backend — REST layer, services, data access, caching, or async work.
 metadata:
   origin: ECC
 ---
-
 # Spring Boot Development Patterns
 
 Spring Boot architecture and API patterns for scalable, production-grade services.

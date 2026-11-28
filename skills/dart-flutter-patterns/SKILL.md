@@ -1,10 +1,10 @@
 ---
 name: dart-flutter-patterns
+category: framework
 description: Production-ready Dart and Flutter patterns covering null safety, immutable state with Freezed, async composition, widget architecture, state management (BLoC, Riverpod, Provider), GoRouter navigation with auth guards, Dio networking, error handling, and testing. Use when writing or reviewing Dart and Flutter code — state, widgets, navigation, networking, or architecture.
 metadata:
   origin: ECC
 ---
-
 # Dart/Flutter Patterns
 
 ## When to Use

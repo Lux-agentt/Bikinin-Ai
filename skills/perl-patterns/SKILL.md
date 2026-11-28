@@ -1,10 +1,10 @@
 ---
 name: perl-patterns
+category: framework
 description: Modern Perl 5.36+ idioms, best practices, and conventions for building robust, maintainable Perl applications. Use when writing or reviewing modern Perl 5.36+ code.
 metadata:
   origin: ECC
 ---
-
 # Modern Perl Development Patterns
 
 Idiomatic Perl 5.36+ patterns and best practices for building robust, maintainable applications.

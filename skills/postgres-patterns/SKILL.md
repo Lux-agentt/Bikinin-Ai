@@ -1,10 +1,10 @@
 ---
 name: postgres-patterns
+category: backend-api
 description: PostgreSQL database patterns for query optimization, schema design, indexing, and security. Based on Supabase best practices. Use when designing PostgreSQL schemas, indexes, or RLS policies, or when a query is too slow.
 metadata:
   origin: ECC
 ---
-
 # PostgreSQL Patterns
 
 Quick reference for PostgreSQL best practices. For detailed guidance, use the `database-reviewer` agent.

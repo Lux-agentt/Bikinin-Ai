@@ -1,10 +1,10 @@
 ---
 name: hexagonal-architecture
+category: backend-api
 description: Design, implement, and refactor Ports & Adapters systems with clear domain boundaries, dependency inversion, and testable use-case orchestration across TypeScript, Java, Kotlin, and Go services. Use when introducing or refactoring toward Ports and Adapters, or when domain logic has become entangled with I/O.
 metadata:
   origin: ECC
 ---
-
 # Hexagonal Architecture
 
 Hexagonal architecture (Ports and Adapters) keeps business logic independent from frameworks, transport, and persistence details. The core app depends on abstract ports, and adapters implement those ports at the edges.

@@ -1,9 +1,9 @@
 ---
 name: godot-patterns
+category: framework
 description: Idiomatic Godot 4 GDScript patterns - static typing, scene and node design, signals, resources, autoloads, input, and lifecycle safety. Use when writing or reviewing GDScript, designing scenes, or deciding where game state should live.
 origin: ECC
 ---
-
 # Godot 4 GDScript Patterns
 
 Idiomatic patterns for Godot 4.x projects written in GDScript. Verified against the Godot 4.7 documentation; most guidance applies to every 4.x release.
