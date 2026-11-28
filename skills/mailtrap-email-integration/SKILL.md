@@ -1,9 +1,9 @@
 ---
 name: mailtrap-email-integration
+category: konten-sosial
 description: Guides agents through integrating transactional email sending via Mailtrap's Email API, including sandbox testing, domain verification, and API authentication. Use when implementing email-sending features, debugging delivery issues, or setting up safe dev/staging email testing.
 origin: ECC
 ---
-
 # Mailtrap Email Integration
 
 Patterns for adding transactional email sending to an application using Mailtrap's Email API and Sandbox, covering authentication, environment separation, and common delivery pitfalls.

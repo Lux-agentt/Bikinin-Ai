@@ -1,8 +1,8 @@
 ---
 name: web3-start-here
+category: web3-bounty
 description: Master index for the web3 smart contract security knowledge base. Use this to navigate the skill chain. Read files in order — each ends with NEXT.
 ---
-
 # WEB3 SKILLS — MASTER INDEX
 
 > Built from: 2,749 Immunefi reports + 100+ paid writeups + DeFiHackLabs (681 hacks) + ConsenSys + SlowMist + Trail of Bits + Foundry + Nethermind + Lido + AI agent research + live hunt experience

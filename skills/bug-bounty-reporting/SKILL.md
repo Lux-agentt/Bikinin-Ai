@@ -1,8 +1,8 @@
 ---
 name: bug-bounty-reporting
+category: web3-bounty
 description: Gunakan saat menyusun atau memperbaiki laporan bug bounty yang sudah ditemukan dan diverifikasi dalam scope program yang mengizinkan.
 ---
-
 # Bug Bounty Reporting
 
 ## Prasyarat

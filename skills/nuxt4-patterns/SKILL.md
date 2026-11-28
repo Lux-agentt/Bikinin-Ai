@@ -1,10 +1,10 @@
 ---
 name: nuxt4-patterns
+category: website
 description: Nuxt 4 app patterns for hydration safety, performance, route rules, lazy loading, and SSR-safe data fetching with useFetch and useAsyncData. Use when building or reviewing a Nuxt 4 app, or debugging hydration mismatches and SSR-safe data fetching.
 metadata:
   origin: ECC
 ---
-
 # Nuxt 4 Patterns
 
 Use when building or debugging Nuxt 4 apps with SSR, hybrid rendering, route rules, or page-level data fetching.

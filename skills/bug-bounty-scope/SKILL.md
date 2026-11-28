@@ -1,8 +1,8 @@
 ---
 name: bug-bounty-scope
+category: web3-bounty
 description: Gunakan sebelum riset atau pengujian keamanan terkait program bug bounty, untuk memastikan target dan metode benar-benar diizinkan.
 ---
-
 # Bug Bounty Scope and Safety
 
 ## Tujuan

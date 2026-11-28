@@ -1,9 +1,9 @@
 ---
 name: web3-hunt-foundation
+category: web3-bounty
 description: Hunter mindset, recon setup, and target scoring for Web3 bug bounty. Use at the START of any new protocol hunt - scoring targets, setting up environment, understanding architecture.
 Contains: attack/triage mental models, 10-point scorecard (score ≥6 to proceed), crown jewels approach, static analysis setup, recon checklist.
 ---
-
 # WEB3 HUNT FOUNDATION
 > Mindset + Recon + Setup. Read this before touching any new target's code.
 > Replaces: 01-mindset, 02-recon-setup, 20-chain-complete

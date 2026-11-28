@@ -1,8 +1,8 @@
 ---
 name: website-qa
+category: website
 description: Gunakan setelah membuat atau mengubah website untuk memeriksa fungsi, tampilan mobile, aksesibilitas dasar, dan error sebelum selesai.
 ---
-
 # Website QA
 
 Skill ini melengkapi skill `website`; jalankan setelah implementasi, bukan sebagai pengganti test proyek.

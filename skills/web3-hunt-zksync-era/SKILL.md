@@ -1,8 +1,8 @@
 ---
 name: web3-hunt-zksync-era
+category: web3-bounty
 description: ZKsync Era (Immunefi) completed hunt — 0 findings after exhaustive 5-session audit. Use as a DEFENSE STUDY — learn what makes a protocol unhuntable, which patterns block all 10 bug classes, and when to abandon a target. Contains architecture breakdown, 25 tested attack vectors, and pre-dive scoring refinements for large L1 bridge protocols.
 ---
-
 # LIVE HUNT: ZKsync Era (Immunefi) — COMPLETED, 0 FINDINGS
 
 > **Outcome**: 0 submittable findings after 5+ sessions, 22+ agents, 25+ contracts, 25+ attack vectors

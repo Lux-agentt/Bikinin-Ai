@@ -1,10 +1,10 @@
 ---
 name: make-interfaces-feel-better
+category: website
 description: Apply concrete design-engineering details that make interfaces feel polished. Use when reviewing or improving UI spacing, typography, borders, shadows, motion, hit areas, icons, text wrapping, and interaction states.
 metadata:
   origin: community
 ---
-
 # Make Interfaces Feel Better
 
 Use this skill for the small design-engineering details that compound into a

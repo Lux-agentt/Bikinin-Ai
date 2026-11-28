@@ -1,10 +1,10 @@
 ---
 name: social-graph-ranker
+category: konten-sosial
 description: Weighted social-graph ranking for warm intro discovery, bridge scoring, and network gap analysis across X and LinkedIn. Use when the user wants the reusable graph-ranking engine itself, not the broader outreach or network-maintenance workflow layered on top of it.
 metadata:
   origin: ECC
 ---
-
 # Social Graph Ranker
 
 Canonical weighted graph-ranking layer for network-aware outreach.

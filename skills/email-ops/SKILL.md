@@ -1,10 +1,10 @@
 ---
 name: email-ops
+category: konten-sosial
 description: Evidence-first mailbox triage, drafting, send verification, and sent-mail-safe follow-up workflow for ECC. Use when the user wants to organize email, draft or send through the real mail surface, or prove what landed in Sent.
 metadata:
   origin: ECC
 ---
-
 # Email Ops
 
 Use this when the real task is mailbox work: triage, drafting, replying, sending, or proving a message landed in Sent.

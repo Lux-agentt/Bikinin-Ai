@@ -1,8 +1,8 @@
 ---
 name: web-research
+category: website
 description: Gunakan saat pengguna meminta informasi terkini, perbandingan, atau jawaban yang membutuhkan sumber dari web.
 ---
-
 # Web Research
 
 ## Metode

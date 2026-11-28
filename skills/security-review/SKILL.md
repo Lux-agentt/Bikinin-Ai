@@ -1,10 +1,10 @@
 ---
 name: security-review
+category: web3-bounty
 description: Security review checklist and patterns for adding authentication, handling user input, managing secrets, creating API endpoints, or implementing payment and sensitive features.
 metadata:
   origin: ECC
 ---
-
 # Security Review Skill
 
 This skill ensures all code follows security best practices and identifies potential vulnerabilities.

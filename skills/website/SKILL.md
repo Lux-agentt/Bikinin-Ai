@@ -1,8 +1,8 @@
 ---
 name: website
+category: website
 description: Gunakan saat pengguna ingin membuat website, landing page, atau halaman web baru, atau memperbaiki tampilan dan struktur website yang sudah ada.
 ---
-
 # Website
 
 Skill ini dipakai setiap kali tugasnya membuat atau mengubah website.

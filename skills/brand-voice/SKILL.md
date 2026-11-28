@@ -1,8 +1,8 @@
 ---
 name: brand-voice
+category: konten-sosial
 description: Gunakan saat menulis atau menyunting teks website dan konten sosial agar konsisten dengan karakter brand pemilik.
 ---
-
 # Brand Voice
 
 ## Sumber acuan

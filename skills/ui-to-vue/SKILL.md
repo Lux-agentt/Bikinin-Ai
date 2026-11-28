@@ -1,10 +1,10 @@
 ---
 name: ui-to-vue
+category: website
 description: Use when the user has UI screenshots or design exports that need batch conversion into Vue 3 components, especially with Vant, Element Plus, or Ant Design Vue.
 metadata:
   origin: community
 ---
-
 # UI To Vue
 
 Batch-convert UI design screenshots into Vue 3 Composition API component code.

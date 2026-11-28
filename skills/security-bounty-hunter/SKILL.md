@@ -1,11 +1,11 @@
 ---
 name: security-bounty-hunter
+category: web3-bounty
 description: Hunt for exploitable, bounty-worthy security issues in repositories. Focuses on remotely reachable vulnerabilities that qualify for real reports instead of noisy local-only findings. Use when hunting reportable, remotely reachable vulnerabilities in a repository.
 metadata:
   version: "1.0.0"
   origin: ECC direct-port adaptation
 ---
-
 # Security Bounty Hunter
 
 Use this when the goal is practical vulnerability discovery for responsible disclosure or bounty submission, not a broad best-practices review.

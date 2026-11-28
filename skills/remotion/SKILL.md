@@ -1,8 +1,8 @@
 ---
 name: remotion
+category: video
 description: Gunakan saat pengguna ingin membuat video, animasi, atau motion graphic dengan Remotion.
 ---
-
 # Remotion
 
 Skill ini dipakai setiap kali tugasnya membuat atau mengubah video dengan Remotion.

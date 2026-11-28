@@ -1,8 +1,8 @@
 ---
 name: bug-bounty-writeups
+category: web3-bounty
 description: Learn bug bounty methodology from curated writeups, build recon and test checklists by vulnerability class, and report authorized findings.
 ---
-
 # Bug Bounty Writeups
 
 - Use this skill when the user asks for bug bounty methodology, a recon plan, a test checklist for a vulnerability class, or a way to learn from a published writeup.

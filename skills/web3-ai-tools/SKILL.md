@@ -1,9 +1,9 @@
 ---
 name: web3-ai-tools
+category: web3-bounty
 description: AI-powered tools for Web3 bug bounty automation. Use when you want to automate recon, run autonomous audits, or use AI agents for vulnerability discovery.
 Contains: CAI Framework, Shannon AI pentester, LuaN1ao dual-graph agent, SmartGuard multi-agent auditor, AI-generated code hunting patterns, Claude security skills.
 ---
-
 # AI TOOLS ARSENAL
 > AI-powered automation for every phase of Web3 bug hunting.
 > Replaces: 28-cai-framework, 29-claude-skills-security, 30-shannon-ai-pentester,

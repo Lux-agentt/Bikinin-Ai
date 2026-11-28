@@ -1,9 +1,9 @@
 ---
 name: web3-grep-arsenal
+category: web3-bounty
 description: Master grep command arsenal for Web3 smart contract auditing. Use when starting a new protocol scan, before deep code review, or when hunting specific vulnerability classes.
 Contains: 10 grep blocks for all major vuln classes, tier ranking, protocol-specific patterns, 2025 new patterns, copy-paste ready blocks.
 ---
-
 # GREP ARSENAL — MASTER REFERENCE
 > All grep commands in one place. Run in the first 30 minutes of any new target.
 > Replaces: 03-grep-surface-map, 14-grep-master-patterns + grep sections from 04-13

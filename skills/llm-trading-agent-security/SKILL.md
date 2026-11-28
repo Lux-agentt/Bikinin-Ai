@@ -1,11 +1,11 @@
 ---
 name: llm-trading-agent-security
+category: web3-bounty
 description: Security patterns for autonomous trading agents with wallet or transaction authority. Covers prompt injection, spend limits, pre-send simulation, circuit breakers, MEV protection, and key handling. Use when an autonomous agent holds wallet or transaction authority and its limits, simulation, or key handling need review.
 metadata:
   version: "1.0.0"
   origin: ECC direct-port adaptation
 ---
-
 # LLM Trading Agent Security
 
 Autonomous trading agents have a harsher threat model than normal LLM apps: an injection or bad tool path can turn directly into asset loss.

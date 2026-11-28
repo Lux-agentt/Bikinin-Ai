@@ -1,11 +1,11 @@
 ---
 name: evm-token-decimals
+category: web3-bounty
 description: Prevent silent decimal mismatch bugs across EVM chains. Covers runtime decimal lookup, chain-aware caching, bridged-token precision drift, and safe normalization for bots, dashboards, and DeFi tools. Use when handling token amounts across EVM chains, or when a balance, price, or transfer amount is off by orders of magnitude.
 metadata:
   version: "1.0.0"
   origin: ECC direct-port adaptation
 ---
-
 # EVM Token Decimals
 
 Silent decimal mismatches are one of the easiest ways to ship balances or USD values that are off by orders of magnitude without throwing an error.

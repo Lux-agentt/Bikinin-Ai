@@ -1,9 +1,9 @@
 ---
 name: taste
+category: video
 description: Creative-direction layer for music videos and short-form edits in the angelcore / cloud-trance / hyperpop family — a named-genre aesthetic vocabulary, mood + color + light system, beat-synced editing grammar, and a pipeline chaining ECC's video skills from b-roll generation to distribution. Use when a video must feel intentional rather than merely functional — music videos, fancams, moodboard-driven reels, or giving AI-generated b-roll a coherent visual direction.
 origin: ECC
 ---
-
 # Taste
 
 Most AI video advice stops at *how to render frames*. This skill is the layer above

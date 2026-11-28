@@ -1,11 +1,11 @@
 ---
 name: ui-canvas
+category: website
 description: Preview a UI component mockup in a local browser canvas where the human directly edits it (move, resize, edit text, delete, restyle), switches mobile/desktop/custom viewports, tests it, chats with you, and clicks Save and Finish. You then turn the exported edited markup into the production component. Use before committing or rebuilding a feature just to check a visual change.
 metadata:
   origin: ECC
 version: "1.0.0"
 ---
-
 # UI Canvas
 
 Approve-before-you-build loop for user interface work: you write a quick,

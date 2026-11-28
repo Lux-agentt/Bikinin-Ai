@@ -1,8 +1,8 @@
 ---
 name: content-calendar
+category: konten-sosial
 description: Gunakan saat pengguna meminta rencana jadwal konten Instagram atau kalender publikasi untuk periode tertentu.
 ---
-
 # Content Calendar
 
 ## Membuat kalender

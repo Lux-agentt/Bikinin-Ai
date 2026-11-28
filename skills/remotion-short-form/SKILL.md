@@ -1,8 +1,8 @@
 ---
 name: remotion-short-form
+category: video
 description: Gunakan saat membuat video vertikal pendek untuk Instagram Reels atau format sosial serupa dengan Remotion.
 ---
-
 # Remotion Short-Form Video
 
 Skill ini melengkapi skill `remotion`; baca keduanya sebelum membuat project video.

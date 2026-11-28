@@ -1,8 +1,8 @@
 ---
 name: seo-content
+category: website
 description: Gunakan saat pengguna meminta optimasi konten atau halaman website agar lebih mudah ditemukan dan dipahami mesin pencari.
 ---
-
 # SEO Content
 
 ## Langkah
