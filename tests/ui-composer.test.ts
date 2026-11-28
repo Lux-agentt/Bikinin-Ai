@@ -249,6 +249,32 @@ describe("nama + logo luxagent", () => {
   });
 });
 
+describe("pemilih model dropdown", () => {
+  it("model dipilih lewat <select> native, bukan daftar tombol semua model", () => {
+    expect(html).toContain('<select');
+    expect(html).toContain('id="modelSelect"');
+    expect(html).not.toContain('<div id="modelList">');
+    expect(js).toContain('$("#modelSelect")');
+    expect(js).toContain('document.createElement("option")');
+    expect(js).not.toContain('b.className = "pop-i"');
+  });
+
+  it("ganti pilihan menyimpan model + menutup popover", () => {
+    expect(js).toContain(
+      '$("#modelSelect").addEventListener("change"',
+    );
+    expect(js).toMatch(
+      /addEventListener\("change", \(\) => \{[\s\S]*?state\.curModel = \$\("#modelSelect"\)\.value[\s\S]*?savePrefs\(\)[\s\S]*?closePops\(\)/,
+    );
+  });
+
+  it("CSS dropdown ada, aturan daftar tombol lama sudah dibersihkan", () => {
+    expect(css).toContain(".model-select {");
+    expect(css).not.toContain(".pop-i {");
+    expect(css).not.toContain(".pop-check {");
+  });
+});
+
 describe("pindah chat bolak-balik (riwayat / Tab Baru)", () => {
   it("syncFolderPreviews tahan saat hero tidak di DOM (tidak melempar)", () => {
     // Elemen preview folder tinggal di dalam #hero; saat pengguna berada

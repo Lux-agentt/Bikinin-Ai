@@ -1020,38 +1020,27 @@ function updateModelLabel() {
 }
 
 function renderModelList() {
-  const box = $("#modelList");
-  box.replaceChildren();
-  for (const [i, m] of state.models.entries()) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "pop-i" + (m === state.curModel ? " sel" : "");
-    const wrap = document.createElement("span");
-    wrap.className = "pop-b";
-    const name = document.createElement("b");
-    name.textContent = m;
-    const sub = document.createElement("small");
-    sub.textContent =
-      i === 0 ? "Model utama server" : "Model alternatif dari server";
-    wrap.append(name, sub);
-    const check = document.createElement("span");
-    check.className = "pop-check";
-    b.append(wrap, check);
-    b.addEventListener("click", () => {
-      state.curModel = m;
-      savePrefs();
-      updateModelLabel();
-      renderModelList();
-      closePops();
-    });
-    box.appendChild(b);
-  }
+  // Dropdown native (<select>), bukan daftar tombol: 16 model tidak
+  // memenuhi popover; di HP Safari, ketuk select membuka pemilih bawaan.
+  const sel = $("#modelSelect");
+  sel.replaceChildren();
   if (!state.models.length) {
-    const empty = document.createElement("div");
-    empty.className = "exp-empty";
-    empty.textContent = "Tidak ada model dari server.";
-    box.appendChild(empty);
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "Tidak ada model dari server.";
+    sel.appendChild(opt);
+    sel.disabled = true;
+    return;
   }
+  sel.disabled = false;
+  for (const [i, m] of state.models.entries()) {
+    const opt = document.createElement("option");
+    opt.value = m;
+    opt.textContent = i === 0 ? `${m} (utama)` : m;
+    sel.appendChild(opt);
+  }
+  if (state.curModel && state.models.includes(state.curModel))
+    sel.value = state.curModel;
 }
 
 function closePops() {
@@ -1065,6 +1054,12 @@ $("#modelBtn").addEventListener("click", (e) => {
   closePops();
   $("#modelPop").hidden = !open;
   $("#modelBtn").setAttribute("aria-expanded", String(open));
+});
+$("#modelSelect").addEventListener("change", () => {
+  state.curModel = $("#modelSelect").value;
+  savePrefs();
+  updateModelLabel();
+  closePops();
 });
 $("#ringBtn").addEventListener("click", (e) => {
   e.stopPropagation();
