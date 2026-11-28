@@ -212,14 +212,14 @@ describe("unduh transkrip di riwayat", () => {
   });
 });
 
-describe("nama + logo kuxagent", () => {
-  it("judul, meta, dan wordmark memakai kuxagent (bukan Bikinin)", () => {
-    expect(html).toContain("<title>kuxagent — Studio Agent Web Builder</title>");
+describe("nama + logo luxagent", () => {
+  it("judul, meta, dan wordmark memakai luxagent (bukan Bikinin)", () => {
+    expect(html).toContain("<title>luxagent — Studio Agent Web Builder</title>");
     expect(html).toContain(
-      'content="kuxagent — Studio Agent Web Builder.',
+      'content="luxagent — Studio Agent Web Builder.',
     );
     expect(html).toContain(
-      'kux<span class="ai grad-text">agent</span>',
+      'lux<span class="ai grad-text">agent</span>',
     );
     expect(html).not.toContain("Bikinin");
   });
@@ -228,7 +228,7 @@ describe("nama + logo kuxagent", () => {
     expect(html).toContain(
       '<link rel="icon" href="/logo.png" type="image/png" />',
     );
-    expect(html.match(/<img src="\/logo\.png" alt="kuxagent"/g)).toHaveLength(
+    expect(html.match(/<img src="\/logo\.png" alt="luxagent"/g)).toHaveLength(
       3,
     );
     expect(css).toMatch(/\.logo-tile img\s*\{[^}]*object-fit:\s*cover/);
@@ -239,12 +239,12 @@ describe("nama + logo kuxagent", () => {
     expect(server).toContain('type: "image/png"');
   });
 
-  it("identitas agent di system prompt memakai kuxagent", () => {
+  it("identitas agent di system prompt memakai luxagent", () => {
     const prompt = readFileSync(
       new URL("../prompts/system-prompt.md", import.meta.url),
       "utf8",
     );
-    expect(prompt).toContain("Kamu adalah kuxagent,");
+    expect(prompt).toContain("Kamu adalah luxagent,");
     expect(prompt).not.toContain("Bikinin AI");
   });
 });
