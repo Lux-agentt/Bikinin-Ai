@@ -14,7 +14,7 @@ import type { Config } from "../src/config.js";
 import { AgentEvent, toNDJSON } from "../src/events.js";
 import type { ChatResult, LlmClient, ToolCallReq } from "../src/llm/client.js";
 import { createAppServer } from "../src/server/http.js";
-import { RunManager } from "../src/server/runs.js";
+import { BusyError, RunManager } from "../src/server/runs.js";
 import { readSessionEvents } from "../src/server/event-log.js";
 
 const usage = { input_tokens: 100, output_tokens: 20, cached_tokens: 0 };
@@ -205,15 +205,20 @@ describe("web server", () => {
       withCalls(call("t1", "run_command", { command: "npm install" })),
       finalText("ok"),
     ]);
-    const { run_id } = (await (
+    const { run_id, session_id } = (await (
       await post(`${url}/api/runs`, { message: "pasang" })
-    ).json()) as { run_id: string };
+    ).json()) as { run_id: string; session_id: string };
     const rec = manager.get(run_id)!;
     await waitFor(() =>
       rec.events.some((e) => e.type === "approval_requested"),
     );
 
-    const busy = await post(`${url}/api/runs`, { message: "lagi" });
+    // Run kedua di SESI YANG SAMA ditolak (satu sesi cuma boleh satu run);
+    // sesi lain boleh jalan bareng (diuji di tes "run bareng" di bawah).
+    const busy = await post(`${url}/api/runs`, {
+      message: "lagi",
+      session_id,
+    });
     expect(busy.status).toBe(409);
 
     const req = rec.events.find((e) => e.type === "approval_requested");
@@ -234,6 +239,37 @@ describe("web server", () => {
       decision: "allow",
     });
     expect(again.status).toBe(404);
+  });
+
+  it("run bareng: sesi berbeda boleh jalan bersamaan, sesi sama tetap ditolak, run ke-4 ditolak", async () => {
+    const base = await mkdtemp(join(tmpdir(), "bikinin-par-"));
+    await mkdir(join(base, "ws"));
+    const workspace = await realpath(join(base, "ws"));
+    const manager = new RunManager(
+      { ...cfg },
+      {
+        workspace,
+        systemPrompt: "sys",
+        llm: {
+          async chat() {
+            return finalText("ok");
+          },
+        },
+      },
+    );
+    const a = manager.start({ message: "satu" });
+    const b = manager.start({ message: "dua" });
+    const c = manager.start({ message: "tiga" });
+    expect(new Set([a.session_id, b.session_id, c.session_id]).size).toBe(3);
+    expect(() =>
+      manager.start({ message: "lagi", session_id: a.session_id }),
+    ).toThrow(BusyError);
+    expect(() => manager.start({ message: "empat" })).toThrow(BusyError);
+    // Biarkan ketiganya selesai sendiri, lalu pastikan tidak ada yang nyangkut.
+    await new Promise((r) => setTimeout(r, 500));
+    for (const runId of [a.run_id, b.run_id, c.run_id]) {
+      expect(manager.get(runId)?.finished).toBe(true);
+    }
   });
 
   it("stop ends a run waiting for approval with status stopped", async () => {

@@ -14,17 +14,21 @@ const heroEl = $("#hero");
 const isCoarsePointer = matchMedia("(pointer: coarse)").matches;
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const CIRC = 97.39; // 2 * PI * 15.5, matches the ring in app.css
+const MAX_PARALLEL = 3; // sama dengan MAX_CONCURRENT_RUNS server — run ke-4 masuk antrean
 
 const state = {
   cfg: null,
   models: [],
   curModel: null,
   curEffort: "sedang",
-  runId: null,
-  runSessionId: null, // sesi pemilik run yang sedang aktif (bisa beda dari sessionId saat pengguna pindah chat selagi run jalan)
+  runs: new Map(), // sessionId -> runId (run yang sedang jalan; boleh bareng, maks MAX_PARALLEL)
+  sources: new Map(), // runId -> EventSource (satu SSE per run yang jalan)
+  runSessions: new Map(), // runId -> sessionId (balik dari runs, untuk memilah kejadian)
+  lastRunId: null, // run terakhir di chat yang dibuka (untuk tombol Lanjutkan)
+  approvalRunId: null, // run pemilik persetujuan yang sedang dibuka
   sessionId: null,
-  queue: [], // antrean pesan { sessionId, message, files, noteEl } — dikirim selagi run lain aktif, jalan otomatis setelah run itu selesai
-  source: null,
+  queue: [], // antrean pesan { sessionId, message, files, noteEl } — dikirim saat slot run penuh, jalan otomatis begitu ada slot kosong
+  starting: false, // start()/resumeRun() sedang upload + POST (kunci ganda sebelum run tercatat)
   busy: false,
   replaying: false,
   lastPrompt: "",
@@ -123,12 +127,41 @@ function updateSendState() {
   sendBtn.disabled = !state.busy && input.value.trim() === "";
 }
 
-function setBusy(on) {
-  state.busy = on;
-  // Run di chat lain tidak mengunci chat ini: input tetap hidup supaya
-  // pengguna bisa kirim (pesannya masuk antrean), dan tombolnya tetap
-  // Kirim — Stop hanya untuk run di chat yang sedang dibuka.
-  const ownRun = on && state.runSessionId === state.sessionId;
+/** Run yang sedang jalan di chat yang dibuka (null bila tidak ada). */
+function ownRunId() {
+  return state.sessionId === null
+    ? null
+    : (state.runs.get(state.sessionId) ?? null);
+}
+
+function trackRun(sessionId, runId) {
+  state.runs.set(sessionId, runId);
+  state.runSessions.set(runId, sessionId);
+}
+
+function untrackRun(runId) {
+  const sessionId = state.runSessions.get(runId);
+  if (sessionId !== undefined && state.runs.get(sessionId) === runId) {
+    state.runs.delete(sessionId);
+  }
+  state.runSessions.delete(runId);
+  const src = state.sources.get(runId);
+  if (src) {
+    src.close();
+    state.sources.delete(runId);
+  }
+}
+
+/** Hitung ulang status tombol/input dari peta run — dipanggil tiap run
+ *  mulai/selesai/pindah chat. Input terkunci + tombol jadi Stop hanya
+ *  bila chat yang dibuka punya run sendiri; run di chat lain tidak
+ *  mengunci chat ini (pesan baru langsung jalan bareng, bukan antre). */
+function refreshBusyUI() {
+  const wasBusy = state.busy;
+  state.busy = state.runs.size > 0;
+  // Selama start() masih upload + POST, run belum tercatat — kunci input
+  // seperti run sendiri supaya kirim ganda tidak lolos.
+  const ownRun = ownRunId() !== null || state.starting;
   sendBtn.classList.toggle("stop", ownRun);
   const icon = $("#tplIcons").content.querySelector(
     `[data-ic="${ownRun ? "stop" : "send"}"]`,
@@ -137,7 +170,7 @@ function setBusy(on) {
   sendBtn.setAttribute("aria-label", ownRun ? "Hentikan agent" : "Kirim");
   input.disabled = ownRun;
   updateSendState();
-  if (!on) input.focus();
+  if (wasBusy && !state.busy) input.focus();
 }
 
 // ---------- Markdown (DOM only) ----------
@@ -960,7 +993,7 @@ function bindHero() {
   }
   document.querySelectorAll(".sug").forEach((s) => {
     s.addEventListener("click", () => {
-      if (!state.busy) void start(s.dataset.prompt || "");
+      if (!ownRunId()) void start(s.dataset.prompt || "");
     });
   });
   paintFolders();
@@ -1526,7 +1559,7 @@ function addErrorCard(title, message, options = {}) {
   retry.addEventListener("click", () => {
     card.remove();
     if (state.errorCard === card) state.errorCard = null;
-    if (!state.busy && state.lastPrompt) void start(state.lastPrompt);
+    if (!ownRunId() && state.lastPrompt) void start(state.lastPrompt);
   });
   const switchModel = card.querySelector(".switch-model-btn");
   switchModel.hidden = !options.switchModel || state.models.length < 2;
@@ -1706,7 +1739,7 @@ function renderResultCard() {
       () => void downloadFile(state.versions[state.activeVersion]),
     );
   card.querySelector('[data-act="regen"]').addEventListener("click", () => {
-    if (!state.busy && state.lastPrompt) void start(state.lastPrompt);
+    if (!ownRunId() && state.lastPrompt) void start(state.lastPrompt);
   });
   scrollDown(true);
 }
@@ -1921,9 +1954,10 @@ $("#closeOverlay").addEventListener("click", closeOverlay);
 function openApproval(e) {
   // Jangan buka lembar izin saat memutar ulang riwayat: persetujuan lama
   // sudah tidak hidup (tidak ada run yang menunggu), dan menjawabnya
-  // diam-diam gagal karena state.runId kosong.
+  // diam-diam gagal karena tidak ada run yang menunggu.
   if (state.replaying) return;
   state.approvalId = e.approval_id;
+  state.approvalRunId = e.run_id ?? ownRunId();
   $("#approveReason").textContent = `${e.reason} (risiko ${e.risk})`;
   $("#approveCmd").textContent = e.command || "";
   $("#approveSheet").hidden = false;
@@ -1932,11 +1966,12 @@ function openApproval(e) {
 
 function closeApproval() {
   state.approvalId = null;
+  state.approvalRunId = null;
   $("#approveSheet").hidden = true;
 }
 
 async function answer(decision) {
-  if (!state.runId || !state.approvalId) {
+  if (!state.approvalRunId || !state.approvalId) {
     // Lembar izin basi (mis. dari riwayat atau run sudah selesai):
     // jangan diam saja — tutup dan beri tahu kenapa tombol tidak jalan.
     closeApproval();
@@ -1944,9 +1979,10 @@ async function answer(decision) {
     return;
   }
   const approvalId = state.approvalId;
+  const runId = state.approvalRunId;
   closeApproval();
   try {
-    const r = await fetch(`/api/runs/${state.runId}/approval`, {
+    const r = await fetch(`/api/runs/${runId}/approval`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ approval_id: approvalId, decision }),
@@ -1962,23 +1998,19 @@ $("#denyBtn").addEventListener("click", () => void answer("deny"));
 // ---------- Events ----------
 
 function handle(e) {
-  // Kejadian dari run yang jalan di chat lain (pengguna pindah selagi run
-  // aktif): jangan tempelkan ke tampilan chat yang sedang dibuka.
-  // Satu-satunya yang diurus: run_finished membebaskan UI, dan
-  // approval_requested memberi tahu lewat toast supaya pengguna bisa
-  // kembali ke chat itu untuk menjawab.
+  // Kejadian dari run yang jalan di chat lain: jangan tempelkan ke tampilan
+  // chat yang sedang dibuka. Satu-satunya yang diurus: run_finished
+  // (bebaskan slot + jalankan antrean) dan approval_requested (beri tahu
+  // lewat toast supaya pengguna bisa kembali ke chat itu untuk menjawab).
+  const evSessionId = e.run_id ? state.runSessions.get(e.run_id) : undefined;
   if (
     e.run_id &&
-    state.runId &&
-    e.run_id === state.runId &&
-    state.runSessionId !== state.sessionId
+    evSessionId !== undefined &&
+    evSessionId !== state.sessionId
   ) {
     if (e.type === "run_finished") {
-      if (state.source) state.source.close();
-      state.source = null;
-      state.runId = null;
-      state.runSessionId = null;
-      setBusy(false);
+      untrackRun(e.run_id);
+      refreshBusyUI();
       drainQueue();
       syncFolderPreviews();
       toast("Agent selesai bekerja di chat lain.");
@@ -2036,6 +2068,12 @@ function handle(e) {
         ) {
           showCode(row.text, e.output_preview);
         }
+        // Langkah yang selesai dilipat: cuplikannya disembunyikan supaya
+        // daftar tetap pendek dan yang sedang jalan (› + cuplikan)
+        // langsung kelihatan — sebelumnya semua baris menampilkan
+        // cuplikan, jadi langkah yang selesai tidak kelihatan "tertutup".
+        // Yang gagal tetap terbuka (baris error-nya penting).
+        if (e.ok && row.snippet) row.snippet.hidden = true;
       }
       break;
     }
@@ -2056,7 +2094,9 @@ function handle(e) {
       }
       if (e.diff) {
         showCode(`Diff: ${e.path}`, e.diff);
-        // Cuplikan diff di bawah langkah write/edit file yang bersangkutan.
+        // Cuplikan diff di bawah langkah write/edit file yang bersangkutan
+        // — tapi jangan buka lagi baris yang sudah selesai (langkah
+        // selesai tetap terlipat; diff-nya sudah tampil di panel kode).
         const t = state.think;
         if (t) {
           for (const row of [...t.rows.values()].reverse()) {
@@ -2064,7 +2104,12 @@ function handle(e) {
               row.text === `write_file ${e.path}` ||
               row.text === `edit_file ${e.path}`
             ) {
-              setStepCode(row, e.diff);
+              if (
+                !row.line.classList.contains("ok") &&
+                !row.line.classList.contains("fail")
+              ) {
+                setStepCode(row, e.diff);
+              }
               row.snippetFromDiff = true;
               break;
             }
@@ -2136,7 +2181,7 @@ function handle(e) {
       if (state.replaying) break;
       renderDiffs();
       void finishRunLive(e);
-      if (e.status === "budget_exceeded" && e.resumable) showResume();
+      if (e.status === "budget_exceeded" && e.resumable) showResume(e.run_id);
       break;
     }
 
@@ -2165,22 +2210,21 @@ async function finishRunLive(e) {
       bytes: info.bytes,
       title: path,
       content,
-      runId: state.runId,
+      runId: e.run_id,
     });
     state.activeVersion = state.versions.length - 1;
     renderResultCard();
     updateRevBar();
   }
-  if (state.source) state.source.close();
-  state.source = null;
-  setBusy(false);
+  untrackRun(e.run_id);
+  refreshBusyUI();
   drainQueue();
   syncFolderPreviews();
 }
 
 function listen(runId) {
   const es = new EventSource(`/api/runs/${runId}/events`);
-  state.source = es;
+  state.sources.set(runId, es);
   const types = [
     "run_started",
     "text_delta",
@@ -2213,12 +2257,12 @@ function listen(runId) {
   }
   // EventSource resumes by itself with Last-Event-ID; it is closed on run_finished.
   // Bila stream putus (mis. server di-restart selagi run jalan), EventSource
-  // retry selamanya tanpa run_finished — busy nyangkut dan pengguna tidak
-  // bisa pindah chat ("Hentikan agent dulu" terus). Cek sekali per error:
-  // bila run sudah tidak ada di server (404), bebaskan UI otomatis.
+  // retry selamanya tanpa run_finished — slot run nyangkut dan antrean
+  // tidak jalan. Cek sekali per error: bila run sudah tidak ada di server
+  // (404), bebaskan slotnya otomatis.
   let livenessChecked = false;
   es.onerror = () => {
-    if (livenessChecked || state.source !== es) return;
+    if (livenessChecked || state.sources.get(runId) !== es) return;
     livenessChecked = true;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 3000);
@@ -2226,12 +2270,16 @@ function listen(runId) {
       .then((r) => {
         clearTimeout(timer);
         ctrl.abort(); // tutup koneksi probe — status header saja yang dibutuhkan
-        if (r.status === 404 && state.source === es) {
-          es.close();
-          state.source = null;
-          setBusy(false);
-          if (state.think) finishThink("stopped", state.think.count);
-          toast("Koneksi ke server putus — run dihentikan, sudah bisa pindah chat.");
+        if (r.status === 404 && state.sources.get(runId) === es) {
+          // Blok think cuma ditutup bila run yang mati itu milik chat yang
+          // sedang dibuka; run di chat lain cukup dilepas diam-diam.
+          const isOwn = state.runSessions.get(runId) === state.sessionId;
+          untrackRun(runId);
+          refreshBusyUI();
+          if (isOwn) {
+            if (state.think) finishThink("stopped", state.think.count);
+            toast("Koneksi ke server putus — run dihentikan, sudah bisa pindah chat.");
+          }
           drainQueue();
         }
       })
@@ -2244,8 +2292,9 @@ function listen(runId) {
   };
 }
 
-// Pesan yang dikirim selagi run lain aktif: simpan + tampilkan sebagai
-// bubble user dengan catatan antrean, lalu jalan otomatis saat gilirannya tiba.
+// Pesan yang dikirim saat slot run penuh (sudah MAX_PARALLEL run jalan
+// bareng): simpan + tampilkan sebagai bubble user dengan catatan antrean,
+// lalu jalan otomatis begitu ada slot kosong.
 function queueMessage(sessionId, message) {
   const files = state.pendingFiles;
   const names = files.map((f) => f.name);
@@ -2258,17 +2307,17 @@ function queueMessage(sessionId, message) {
     const note = document.createElement("div");
     note.className = "queued-note";
     note.textContent =
-      "Menunggu giliran — jalan otomatis setelah run di chat lain selesai.";
+      "Menunggu giliran — jalan otomatis begitu ada slot run kosong.";
     main.appendChild(note);
     scrollDown(true);
     entry.noteEl = note;
   }
-  toast("Pesan masuk antrean — jalan otomatis setelah run selesai.");
+  toast("Pesan masuk antrean — jalan otomatis begitu ada slot kosong.");
 }
 
-// Jalankan antrean pertama untuk chat yang sedang dibuka (kalau lagi nganggur).
+// Jalankan antrean pertama untuk chat yang sedang dibuka (kalau ada slot kosong).
 function drainQueue() {
-  if (state.busy) return;
+  if (state.runs.size >= MAX_PARALLEL || state.starting) return;
   const i = state.queue.findIndex((e) => e.sessionId === state.sessionId);
   if (i < 0) return;
   const [entry] = state.queue.splice(i, 1);
@@ -2278,11 +2327,77 @@ function drainQueue() {
   void start(entry.message, { alreadyShown: true });
 }
 
+/** Cek run masih ada di server atau sudah mati (mis. server restart
+ *  selagi run jalan). "unknown" = jaringan sempat putus — jangan vonis
+ *  mati, biarkan SSE yang memutuskan lewat liveness check-nya. */
+async function probeRunAlive(runId) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3000);
+  try {
+    const r = await fetch(`/api/runs/${runId}/events`, { signal: ctrl.signal });
+    return r.status === 404 ? "dead" : "alive";
+  } catch {
+    return "unknown";
+  } finally {
+    clearTimeout(timer);
+    ctrl.abort();
+  }
+}
+
+/** Sambung lagi ke run yang masih jalan di server (setelah refresh atau
+ *  pindah chat). Server memutar ulang kejadian yang terlewat berdasarkan
+ *  seq, jadi tidak ada yang hilang dari tampilan. */
+async function reattachRun(sessionId, runId) {
+  const alive = await probeRunAlive(runId);
+  if (alive === "dead") {
+    if (sessionId === state.sessionId && state.think)
+      finishThink("stopped", state.think.count);
+    return;
+  }
+  trackRun(sessionId, runId);
+  refreshBusyUI();
+  listen(runId);
+}
+
+/** Saat halaman dimuat: bila ada run yang masih jalan di server (mis.
+ *  pengguna refresh selagi agent bekerja), kembali ke chat itu dan
+ *  sambung lagi — jangan biarkan pengguna mendarat di layar awal dengan
+ *  kesan run-nya berhenti. */
+async function reattachLiveRun() {
+  let list;
+  try {
+    list = await fetchJson("/api/sessions");
+  } catch {
+    return;
+  }
+  if (!Array.isArray(list) || list.length === 0) return;
+  const newest = list[0];
+  if (!newest || !newest.session_id) return;
+  let detail;
+  try {
+    detail = await fetchJson(
+      `/api/sessions/${encodeURIComponent(newest.session_id)}`,
+    );
+  } catch {
+    return;
+  }
+  const unfinished = (detail.runs ?? []).filter(
+    (r) => !r.events.some((e) => e.type === "run_finished"),
+  );
+  if (unfinished.length > 0) await restoreSession(newest.session_id);
+}
+
 async function start(message, opts = {}) {
-  if (!message || state.busy) return;
+  // Satu sesi cuma boleh satu run aktif; slot global maks MAX_PARALLEL —
+  // run ke-4 masuk antrean, bukan ditolak diam-diam.
+  if (!message || ownRunId() || state.starting) return;
+  if (state.runs.size >= MAX_PARALLEL) {
+    queueMessage(state.sessionId, message);
+    return;
+  }
   const isNewSession = !state.sessionId;
-  state.runSessionId = state.sessionId;
-  setBusy(true);
+  state.starting = true;
+  refreshBusyUI();
   // Upload first: if it fails, no run starts and the files stay selected.
   let attachmentIds = [];
   let attachedNames = [];
@@ -2291,7 +2406,8 @@ async function start(message, opts = {}) {
     try {
       attachmentIds = await uploadPendingFiles();
     } catch (err) {
-      setBusy(false);
+      state.starting = false;
+      refreshBusyUI();
       toast(err instanceof Error ? err.message : "Upload gagal.");
       return;
     }
@@ -2346,20 +2462,23 @@ async function start(message, opts = {}) {
       throw new Error(detail || `Server menolak permintaan (${r.status}).`);
     }
     const data = await r.json();
-    state.runId = data.run_id;
     state.sessionId = data.session_id;
-    state.runSessionId = data.session_id;
+    trackRun(data.session_id, data.run_id);
     // Run ini membuat sesi baru (dari layar awal): pesan yang diantre dari
     // layar awal ikut sesi baru ini, bukan nyangkut tanpa sesi.
     if (isNewSession) {
       for (const q of state.queue)
         if (q.sessionId === null) q.sessionId = data.session_id;
     }
+    state.starting = false;
+    refreshBusyUI();
     listen(data.run_id);
+    // Slot mungkin masih sisa — jalankan antrean berikutnya bila ada.
+    drainQueue();
   } catch (err) {
     finishThink("error", 0);
-    state.runSessionId = null;
-    setBusy(false);
+    state.starting = false;
+    refreshBusyUI();
     addErrorCard(
       "Koneksi ke agent terputus",
       err instanceof Error ? err.message : "Gagal menghubungi server.",
@@ -2368,17 +2487,17 @@ async function start(message, opts = {}) {
 }
 
 async function stopRun() {
-  if (!state.busy || !state.runId) return;
+  const runId = ownRunId();
+  if (!runId) return;
   try {
-    const r = await fetch(`/api/runs/${state.runId}/stop`, { method: "POST" });
+    const r = await fetch(`/api/runs/${runId}/stop`, { method: "POST" });
     if (r.status === 404) {
       // Run sudah tidak ada di server (mis. server di-restart selagi UI
       // masih menampilkan "berjalan", atau run selesai tapi event
       // run_finished tidak sampai): bebaskan UI supaya riwayat dan tombol
       // lain bisa dipakai lagi, bukan terkunci di "Hentikan agent dulu".
-      if (state.source) state.source.close();
-      state.source = null;
-      setBusy(false);
+      untrackRun(runId);
+      refreshBusyUI();
       if (state.think) finishThink("stopped", state.think.count);
       toast("Agent sudah berhenti — run tidak ditemukan di server.");
       drainQueue();
@@ -2393,8 +2512,9 @@ async function stopRun() {
 // Lanjutkan run yang berhenti karena batas: server membuat run baru di sesi
 // yang sama dengan batas baru; riwayat sesi sudah berisi transkrip run lama,
 // jadi agent meneruskan dari titik berhentinya.
-function showResume() {
-  if (!state.runId) return;
+function showResume(runId) {
+  if (!runId) return;
+  state.lastRunId = runId;
   const wrap = document.createElement("div");
   wrap.className = "resume-wrap";
   const note = document.createElement("small");
@@ -2415,24 +2535,28 @@ function showResume() {
 }
 
 async function resumeRun() {
-  if (!state.runId || state.busy) return;
-  setBusy(true);
+  if (!state.lastRunId || ownRunId()) return;
+  state.starting = true;
+  refreshBusyUI();
   addThink("Melanjutkan run…");
   try {
-    const r = await fetch(`/api/runs/${state.runId}/resume`, {
+    const r = await fetch(`/api/runs/${state.lastRunId}/resume`, {
       method: "POST",
     });
     if (r.status === 409)
       throw new Error("Run tidak bisa dilanjutkan sekarang.");
     if (!r.ok) throw new Error(`Server menolak permintaan (${r.status}).`);
     const data = await r.json();
-    state.runId = data.run_id;
     state.sessionId = data.session_id;
-    state.runSessionId = data.session_id;
+    trackRun(data.session_id, data.run_id);
+    state.lastRunId = data.run_id;
+    state.starting = false;
+    refreshBusyUI();
     listen(data.run_id);
   } catch (err) {
     finishThink("error", 0);
-    setBusy(false);
+    state.starting = false;
+    refreshBusyUI();
     addErrorCard(
       "Gagal melanjutkan run",
       err instanceof Error ? err.message : "Gagal menghubungi server.",
@@ -2442,17 +2566,17 @@ async function resumeRun() {
 
 function resetSession() {
   // Boleh kembali ke layar awal selagi run jalan — run lanjut di latar
-  // (server cuma jalanin satu run; kirim baru tetap nunggu run selesai).
+  // (server boleh jalanin sampai 3 run bareng; kirim baru langsung jalan
+  // bila ada slot, antre bila penuh).
   closeOverlay();
   closeFolderSheet();
   clearInterval(state.timerInt);
   state.think = null;
   main.replaceChildren(heroEl);
-  if (!state.busy) {
-    state.runId = null;
-    state.runSessionId = null;
-  }
   state.sessionId = null;
+  state.lastRunId = null;
+  state.approvalId = null;
+  state.approvalRunId = null;
   state.files.clear();
   state.versions = [];
   state.activeVersion = -1;
@@ -2473,15 +2597,16 @@ function resetSession() {
       : "Sesi direset ke layar awal",
   );
   // Segarkan tombol/input untuk layar baru (run di chat lain tidak
-  // mengunci input) + jalankan antrean layar ini bila nganggur.
-  setBusy(state.busy);
+  // mengunci input) + jalankan antrean layar ini bila ada slot.
+  refreshBusyUI();
   drainQueue();
 }
 
 async function restoreSession(sessionId) {
-  // Boleh pindah chat selagi run jalan — run lanjut di latar, SSE tetap
-  // terpasang supaya run_finished-nya tetap sampai (handle() yang
-  // memilah kejadian latar vs kejadian chat yang sedang dibuka).
+  // Boleh pindah chat selagi run jalan — run lanjut di latar; saat chat
+  // ini dibuka lagi, sambung ke stream run-nya bila masih hidup
+  // (reattachRun), supaya kejadian live tetap tertempel dan refresh tidak
+  // lagi menampilkan run sebagai "berhenti" padahal server masih kerja.
   let detail;
   try {
     detail = await fetchJson(`/api/sessions/${encodeURIComponent(sessionId)}`);
@@ -2492,10 +2617,7 @@ async function restoreSession(sessionId) {
   closeFolderSheet();
   closeOverlay();
   state.sessionId = detail.session_id;
-  if (!state.busy) {
-    state.runId = null;
-    state.runSessionId = null;
-  }
+  state.lastRunId = null;
   // Blok think tampilan lama ikut terlepas dari DOM — lepas referensinya
   // supaya replay membangun blok baru untuk chat ini.
   state.think = null;
@@ -2527,9 +2649,35 @@ async function restoreSession(sessionId) {
     // nyangkut dan run berikutnya dapat blok think baru yang bersih.
     // KECUALI run yang dipulihkan ini masih jalan (pengguna kembali ke
     // chat yang run-nya aktif): blok think-nya harus tetap hidup supaya
-    // kejadian live tetap tertempel.
-    const liveRun = detail.runs.some((r) => r.run_id === state.runId);
+    // kejadian live tetap tertempel — reattachRun yang memastikan run-nya
+    // masih ada di server.
+    const unfinished = detail.runs.filter(
+      (r) => !r.events.some((e) => e.type === "run_finished"),
+    );
+    const liveRun =
+      unfinished.find((r) => r.run_id === ownRunId()) ?? unfinished.at(-1);
     if (state.think && !liveRun) finishThink("stopped", state.think.count);
+    if (liveRun && liveRun.run_id !== ownRunId()) {
+      void reattachRun(detail.session_id, liveRun.run_id);
+    }
+    // Persetujuan yang masih menggantung (run menunggu jawaban saat halaman
+    // di-refresh): buka lagi lembarnya — kalau tidak, run diam selamanya
+    // menunggu jawaban yang tidak bisa diberikan, dan dari sisi pengguna
+    // agent "berhenti" tiap kali refresh.
+    if (liveRun) {
+      const evs = liveRun.events;
+      const req = [...evs]
+        .reverse()
+        .find((e) => e.type === "approval_requested");
+      const resolved =
+        req &&
+        evs.some(
+          (e) =>
+            e.type === "approval_resolved" &&
+            e.approval_id === req.approval_id,
+        );
+      if (req && !resolved) openApproval(req);
+    }
   }
   // One version per run; content is the current workspace file (older runs were
   // overwritten, so no snapshot is faked for them).
@@ -2559,8 +2707,8 @@ async function restoreSession(sessionId) {
       : "Proyek dibuka dari riwayat",
   );
   // Segarkan tombol/input untuk chat yang baru dibuka (run di chat lain
-  // tidak mengunci input chat ini) + jalankan antrean chat ini bila nganggur.
-  setBusy(state.busy);
+  // tidak mengunci input chat ini) + jalankan antrean chat ini bila ada slot.
+  refreshBusyUI();
   drainQueue();
 }
 
@@ -2592,8 +2740,9 @@ input.addEventListener("keydown", (ev) => {
 $("#form").addEventListener("submit", (ev) => {
   ev.preventDefault();
   // Run di chat ini: tombol berfungsi sebagai Stop. Run di chat lain:
-  // kirim seperti biasa — pesannya masuk antrean.
-  if (state.busy && state.runSessionId === state.sessionId) {
+  // kirim seperti biasa — langsung jalan bareng (atau masuk antrean bila
+  // slot penuh, start() yang mengurusnya).
+  if (ownRunId()) {
     void stopRun();
     return;
   }
@@ -2601,10 +2750,6 @@ $("#form").addEventListener("submit", (ev) => {
   if (!text) return;
   input.value = "";
   autoGrow();
-  if (state.busy) {
-    queueMessage(state.sessionId, text);
-    return;
-  }
   void start(text);
 });
 
@@ -2659,3 +2804,7 @@ fetch("/api/config")
   .catch(() => {
     $("#modelLabel").textContent = "server tidak terjangkau";
   });
+
+// Sambung lagi ke run yang masih jalan (kalau ada) — pengguna yang
+// refresh selagi agent bekerja langsung kembali ke chat itu.
+void reattachLiveRun();

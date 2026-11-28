@@ -136,9 +136,17 @@ export class NotConfiguredError extends Error {}
 /** An attachment_id that is missing, outside the workspace, or secret. */
 export class BadAttachmentError extends Error {}
 
+/** Batas run yang jalan bareng: satu per sesi, maks 3 sekaligus. VPS cuma
+ *  1 vCPU — run kebanyakan nunggu LLM (jaringan), jadi 3 masih aman; lebih
+ *  dari itu antrean client yang menahan (bukan server yang menolak diam-diam). */
+export const MAX_CONCURRENT_RUNS = 3;
+
 export class RunManager {
   private readonly runs = new Map<string, RunRecord>();
-  private activeRunId: string | null = null;
+  // Run yang sedang jalan, per sesi: beberapa run boleh jalan bareng
+  // (satu per sesi, maks MAX_CONCURRENT_RUNS) — sebelumnya cuma satu run
+  // global, jadi pindah chat berarti run lama harus selesai dulu.
+  private readonly activeRunIds = new Set<string>();
   private readonly sessions = new Map<string, SessionHistory>();
   private readonly meta = new Map<string, SessionMeta>();
 
@@ -284,6 +292,14 @@ export class RunManager {
       .sort((a, b) => b.updated_at - a.updated_at);
   }
 
+  /** True bila sesi ini sudah punya run yang sedang jalan. */
+  private sessionHasActiveRun(sessionId: string): boolean {
+    for (const id of this.activeRunIds) {
+      if (this.runs.get(id)?.sessionId === sessionId) return true;
+    }
+    return false;
+  }
+
   /**
    * Deletes a session: memory (meta + finished run records), the
    * persisted .json + .jsonl log, and the ledger file. The shared
@@ -295,11 +311,7 @@ export class RunManager {
   ): Promise<"ok" | "not-found" | "busy"> {
     const m = this.meta.get(sessionId);
     if (!m) return "not-found";
-    const active =
-      this.activeRunId !== null
-        ? this.runs.get(this.activeRunId)
-        : undefined;
-    if (active && active.sessionId === sessionId) return "busy";
+    if (this.sessionHasActiveRun(sessionId)) return "busy";
     for (const runId of m.runIds) {
       const rec = this.runs.get(runId);
       // The event log drains in the background: wait for pending appends
@@ -425,14 +437,21 @@ export class RunManager {
       throw new NotConfiguredError(
         "LLM belum dikonfigurasi — isi LLM_BASE_URL, LLM_API_KEY, dan BIKININ_MODEL di .env, lalu restart server.",
       );
-    if (this.activeRunId !== null)
-      throw new BusyError("masih ada run yang berjalan");
 
     // Only reuse a session id this server issued; anything else starts a new session.
     const sessionId =
       body.session_id && this.sessions.has(body.session_id)
         ? body.session_id
         : `s_${randomUUID().slice(0, 8)}`;
+    // Run bareng: satu sesi cuma boleh satu run aktif, dan total maks
+    // MAX_CONCURRENT_RUNS. Sesi lain tetap boleh jalan — penolakan lama
+    // ("masih ada run yang berjalan") berlaku global dan memaksa antre.
+    if (this.sessionHasActiveRun(sessionId))
+      throw new BusyError("sesi ini masih ada run yang berjalan");
+    if (this.activeRunIds.size >= MAX_CONCURRENT_RUNS)
+      throw new BusyError(
+        `sudah ${MAX_CONCURRENT_RUNS} run berjalan bersamaan — tunggu satu selesai`,
+      );
     // Model router (Fase 7): reorder providers for this run. An explicit
     // model (body.model) always beats the router; an unknown model name is
     // ignored and the router decides instead.
@@ -518,7 +537,9 @@ export class RunManager {
     | { error: "not-found" | "busy" | "not-resumable" } {
     const old = this.runs.get(runId);
     if (!old) return { error: "not-found" };
-    if (this.activeRunId !== null) return { error: "busy" };
+    if (this.sessionHasActiveRun(old.sessionId)) return { error: "busy" };
+    if (this.activeRunIds.size >= MAX_CONCURRENT_RUNS)
+      return { error: "busy" };
     const last = old.events.at(-1);
     if (
       !old.finished ||
@@ -595,7 +616,7 @@ export class RunManager {
       effort,
     };
     this.runs.set(runId, rec);
-    this.activeRunId = runId;
+    this.activeRunIds.add(runId);
 
     const emit: EmitFn = createEmitter(runId, (e) => {
       rec.events.push(e);
@@ -647,7 +668,7 @@ export class RunManager {
     ).finally(() => {
       for (const resolve of rec.pending.values()) resolve(false);
       rec.pending.clear();
-      this.activeRunId = null;
+      this.activeRunIds.delete(runId);
     });
 
     return { run_id: runId, session_id: sessionId };

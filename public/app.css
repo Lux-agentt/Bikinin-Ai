@@ -2530,8 +2530,12 @@ main::-webkit-scrollbar {
   color: var(--blue-2);
 }
 .think-line.ok::before {
-  content: "✓ ";
-  color: var(--green);
+  /* Tanda selesai dibuat netral (·, meredup) — bukan ✓ hijau: ✓ di
+   * tiap baris bikin daftar kelihatan sudah selesai semua, padahal run
+   * masih jalan. ✓ hanya untuk header run ("Selesai ✓") dan langkah
+   * rencana yang selesai. Yang gagal tetap ✗ merah. */
+  content: "· ";
+  color: var(--muted);
 }
 .think-line.fail {
   color: var(--red);

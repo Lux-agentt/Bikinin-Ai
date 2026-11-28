@@ -123,6 +123,16 @@ describe("UI proses run simpel (tidak penuh teks)", () => {
     expect(css).toMatch(/\.think-line\.ok \{[^}]*opacity: 0\.6/);
     expect(css).toMatch(/\.think-line::before \{[^}]*content: "› "/);
   });
+
+  it("langkah selesai tidak lagi bertanda ✓ dan cuplikannya terlipat", () => {
+    // ✓ di tiap baris bikin daftar kelihatan sudah selesai semua padahal
+    // run masih jalan — ✓ hanya untuk header run dan langkah rencana.
+    expect(css).toMatch(/\.think-line\.ok::before \{[^}]*content: "· "/);
+    expect(css).not.toMatch(/\.think-line\.ok::before \{[^}]*content: "✓ "/);
+    expect(js).toMatch(
+      /case "tool_call_finished":[\s\S]*?if \(e\.ok && row\.snippet\) row\.snippet\.hidden = true;/,
+    );
+  });
 });
 
 describe("tampilan proses kayak Z.ai (lipat saat selesai)", () => {
@@ -159,7 +169,7 @@ describe("tampilan proses kayak Z.ai (lipat saat selesai)", () => {
 describe("stop membebaskan UI yang macet", () => {
   it("stopRun mengenali run yang sudah hilang (404) dan mematikan busy", () => {
     expect(js).toMatch(
-      /async function stopRun\(\) \{[\s\S]*?r\.status === 404[\s\S]*?setBusy\(false\)/,
+      /async function stopRun\(\) \{[\s\S]*?const runId = ownRunId\(\)[\s\S]*?r\.status === 404[\s\S]*?untrackRun\(runId\)[\s\S]*?refreshBusyUI\(\)/,
     );
   });
 
@@ -172,7 +182,9 @@ describe("stop membebaskan UI yang macet", () => {
   it("stream putus + run tidak ada di server (404) membebaskan UI otomatis", () => {
     expect(js).toMatch(/es\.onerror = \(\) => \{/);
     expect(js).toMatch(/fetch\(`\/api\/runs\/\$\{runId\}\/events`/);
-    expect(js).toMatch(/if \(r\.status === 404 && state\.source === es\)/);
+    expect(js).toMatch(
+      /if \(r\.status === 404 && state\.sources\.get\(runId\) === es\)/,
+    );
     expect(js).toMatch(/toast\("Koneksi ke server putus/);
   });
 });
@@ -247,6 +259,17 @@ describe("nama + logo luxagent", () => {
     expect(prompt).toContain("Kamu adalah luxagent,");
     expect(prompt).not.toContain("Bikinin AI");
   });
+
+  it("tugas website wajib baca semua skill website dulu", () => {
+    const prompt = readFileSync(
+      new URL("../prompts/system-prompt.md", import.meta.url),
+      "utf8",
+    );
+    expect(prompt).toContain(
+      "Khusus tugas website: cari SEMUA skill yang berkaitan dengan website",
+    );
+    expect(prompt).toContain("baca semuanya dengan `read_skill` dulu");
+  });
 });
 
 describe("pemilih model dropdown", () => {
@@ -290,7 +313,7 @@ describe("pindah chat bolak-balik (riwayat / Tab Baru)", () => {
 
   it("restoreSession: satu kejadian rusak tidak menggagalkan restore; think run putus ditutup", () => {
     expect(js).toMatch(
-      /async function restoreSession\(sessionId\) \{[\s\S]*?state\.runId = null/,
+      /async function restoreSession\(sessionId\) \{[\s\S]*?state\.lastRunId = null/,
     );
     expect(js).toMatch(
       /async function restoreSession\(sessionId\) \{[\s\S]*?try \{[\s\S]*?for \(const ev of run\.events\) \{[\s\S]*?handle\(ev\)/,
@@ -298,13 +321,20 @@ describe("pindah chat bolak-balik (riwayat / Tab Baru)", () => {
     expect(js).toMatch(
       /async function restoreSession\(sessionId\) \{[\s\S]*?finally \{[\s\S]*?state\.replaying = false/,
     );
-    // Run yang masih jalan tidak ikut ditutup paksa saat restore.
-    expect(js).toContain(
-      "const liveRun = detail.runs.some((r) => r.run_id === state.runId)",
-    );
+    // Run yang masih jalan tidak ikut ditutup paksa saat restore — malah
+    // disambung lagi (reattach), supaya refresh tidak menampilkan run
+    // sebagai "berhenti" padahal server masih mengerjakannya.
+    expect(js).toContain("const unfinished = detail.runs.filter(");
     expect(js).toContain(
       'if (state.think && !liveRun) finishThink("stopped", state.think.count);',
     );
+    expect(js).toContain("void reattachRun(detail.session_id, liveRun.run_id);");
+    // Persetujuan yang menggantung dibuka lagi setelah restore, kalau
+    // tidak run diam selamanya menunggu jawaban.
+    expect(js).toContain(
+      'find((e) => e.type === "approval_requested")',
+    );
+    expect(js).toContain("if (req && !resolved) openApproval(req);");
   });
 
   it("resetSession membersihkan blok think + timer yang nyangkut", () => {
@@ -423,34 +453,54 @@ describe("pindah chat selagi run jalan", () => {
     expect(js).not.toContain('toast("Hentikan agent dulu")');
   });
 
+  it("run bareng: state run/source per sesi, cap 3, antrean cuma saat penuh", () => {
+    expect(js).toContain("runs: new Map(),");
+    expect(js).toContain("sources: new Map(),");
+    expect(js).toContain("const MAX_PARALLEL = 3;");
+    expect(js).toContain("function ownRunId() {");
+    expect(js).toContain("function trackRun(sessionId, runId) {");
+    expect(js).toContain("function untrackRun(runId) {");
+    expect(js).toContain("if (state.runs.size >= MAX_PARALLEL) {");
+  });
+
+  it("refresh/pindah chat menyambung lagi ke run yang masih jalan", () => {
+    expect(js).toContain("async function reattachRun(sessionId, runId) {");
+    expect(js).toContain("async function reattachLiveRun() {");
+    expect(js).toContain("function probeRunAlive(runId) {");
+    expect(js).toContain("void reattachLiveRun();");
+    expect(js).toContain("await restoreSession(newest.session_id);");
+  });
+
   it("handle() memilah kejadian run latar berdasarkan run_id", () => {
-    expect(js).toContain("runSessionId: null,");
-    expect(js).toContain("state.runSessionId !== state.sessionId");
-    expect(js).toContain("Agent selesai bekerja di chat lain.");
     expect(js).toContain(
-      "detail.runs.some((r) => r.run_id === state.runId)",
+      "const evSessionId = e.run_id ? state.runSessions.get(e.run_id) : undefined;",
     );
+    expect(js).toContain("evSessionId !== state.sessionId");
+    expect(js).toContain("Agent selesai bekerja di chat lain.");
+    expect(js).toContain("untrackRun(e.run_id);");
   });
 });
 
 describe("antrean pesan saat run jalan di chat lain", () => {
   it("input tidak dikunci saat run aktif di chat lain (hanya run sendiri yang mengunci)", () => {
     expect(js).toContain("queue: [],");
+    expect(js).toContain("function refreshBusyUI() {");
     expect(js).toContain(
-      "const ownRun = on && state.runSessionId === state.sessionId;",
+      "const ownRun = ownRunId() !== null || state.starting;",
     );
     expect(js).toContain("input.disabled = ownRun;");
     expect(js).not.toMatch(/input\.disabled = on;/);
   });
 
-  it("kirim saat run lain aktif masuk antrean, bukan menghentikan run itu", () => {
-    expect(js).toContain(
-      "if (state.busy && state.runSessionId === state.sessionId) {",
-    );
-    expect(js).toContain("queueMessage(state.sessionId, text);");
+  it("kirim saat run lain aktif langsung jalan bareng, antrean cuma saat slot penuh", () => {
+    expect(js).toContain("if (ownRunId()) {");
+    expect(js).toContain("void stopRun();");
+    // start() antre bila sudah MAX_PARALLEL run jalan bareng.
+    expect(js).toContain("if (state.runs.size >= MAX_PARALLEL) {");
+    expect(js).toContain("queueMessage(state.sessionId, message);");
     expect(js).toContain('note.className = "queued-note";');
     expect(js).toContain(
-      "Menunggu giliran — jalan otomatis setelah run di chat lain selesai.",
+      "Menunggu giliran — jalan otomatis begitu ada slot run kosong.",
     );
   });
 
@@ -467,16 +517,16 @@ describe("antrean pesan saat run jalan di chat lain", () => {
 
   it("run selesai (sendiri maupun latar) menjalankan antrean", () => {
     expect(js).toMatch(
-      /async function finishRunLive[\s\S]*?setBusy\(false\)[\s\S]*?drainQueue\(\)/,
+      /async function finishRunLive[\s\S]*?untrackRun\(e\.run_id\)[\s\S]*?refreshBusyUI\(\)[\s\S]*?drainQueue\(\)/,
     );
     expect(js).toMatch(
-      /drainQueue\(\);[\s\S]{0,120}?toast\("Agent selesai bekerja di chat lain\."\)/,
+      /drainQueue\(\);[\s\S]{0,200}?toast\("Agent selesai bekerja di chat lain\."\)/,
     );
   });
 
   it("pindah/buka chat menyegarkan tombol/input + menjalankan antrean", () => {
-    expect(js).toContain("setBusy(state.busy);");
-    expect(js.match(/drainQueue\(\);/g)).toHaveLength(6);
+    expect(js).toContain("refreshBusyUI();");
+    expect(js.match(/drainQueue\(\);/g)).toHaveLength(7);
   });
 
   it("CSS catatan antrean ada", () => {
