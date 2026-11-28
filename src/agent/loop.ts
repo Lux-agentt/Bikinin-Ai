@@ -276,7 +276,10 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
       summary,
       totals: t,
       duration_ms: durationMs,
-      resumable: status === "budget_exceeded",
+      resumable:
+        status === "budget_exceeded" ||
+        status === "stopped" ||
+        status === "error",
     });
     return {
       status,

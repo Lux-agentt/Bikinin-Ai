@@ -52,6 +52,27 @@ function scripted(responses: ChatResult[]): LlmClient {
   };
 }
 
+function recording(
+  responses: Array<ChatResult | (() => Promise<ChatResult>)>,
+  seen: unknown[],
+): LlmClient {
+  let i = 0;
+  return {
+    async chat(p) {
+      seen.push(p.messages);
+      const r = responses[i++];
+      const out = typeof r === "function" ? await r() : r;
+      if (!out) throw new Error("skrip habis");
+      // Tiru klien LLM asli: panggilan yang sedang jalan dibatalkan saat
+      // sinyal abort menyala (fetch dilempar AbortError) — loop lalu
+      // mengakhiri run dengan status "stopped", bukan "completed".
+      if (p.signal?.aborted) throw new Error("AbortError");
+      if (out.text) p.onText?.(out.text);
+      return out;
+    },
+  };
+}
+
 const cfg: Config = {
   providers: [
     {
@@ -78,6 +99,7 @@ afterEach(async () => {
 async function boot(
   responses: ChatResult[],
   cfgOverride: Partial<Config> = {},
+  llmOverride?: LlmClient,
 ) {
   const base = await mkdtemp(join(tmpdir(), "bikinin-srv-"));
   await mkdir(join(base, "ws"));
@@ -88,7 +110,7 @@ async function boot(
     {
       workspace,
       systemPrompt: "sys",
-      llm: scripted(responses),
+      llm: llmOverride ?? scripted(responses),
     },
   );
   const server = createAppServer(manager, workspace);
@@ -354,6 +376,118 @@ describe("web server", () => {
     );
     expect((await post(`${url}/api/runs/run_deadbeef/resume`, {})).status).toBe(
       404,
+    );
+  });
+
+  it("resumes a stopped run and the new run continues from the old work", async () => {
+    // Aturan user 2026-11-28: kalau kerjaan berhenti, lanjutkan dari yang
+    // sudah dikerjakan — jangan mulai dari awal. Resume run yang dihentikan
+    // harus membawa instruksi lanjutan itu ke prompt run baru.
+    const seen: unknown[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const llm = recording(
+      [
+        withCalls(plan("t0")),
+        withCalls(
+          call("t1", "write_file", {
+            path: "index.html",
+            content: "<h1>Kopi</h1>",
+          }),
+        ),
+        async () => {
+          await gate;
+          return finalText("selesai dari gate");
+        },
+        withCalls(plan("t2")),
+        finalText("Lanjut selesai."),
+      ],
+      seen,
+    );
+    const { url, manager, workspace } = await boot([], {}, llm);
+    const first = (await (
+      await post(`${url}/api/runs`, { message: "buat halaman" })
+    ).json()) as { run_id: string; session_id: string };
+    const rec = manager.get(first.run_id)!;
+    // Tunggu sampai write_file benar-benar selesai (file ada di disk) —
+    // baru run-nya parkir di gate (panggilan chat ke-3), jadi urutan
+    // panggilan LLM deterministik untuk asersi seen[3] di bawah.
+    await waitFor(() =>
+      access(join(workspace, "index.html"))
+        .then(() => true)
+        .catch(() => false),
+    );
+    expect((await post(`${url}/api/runs/${first.run_id}/stop`, {})).status).toBe(
+      202,
+    );
+    release();
+    await waitFor(() =>
+      rec.events.some(
+        (e) => e.type === "run_finished" && e.status === "stopped",
+      ),
+    );
+    const resumed = await post(`${url}/api/runs/${first.run_id}/resume`, {});
+    expect(resumed.status).toBe(201);
+    const { run_id, session_id } = (await resumed.json()) as {
+      run_id: string;
+      session_id: string;
+    };
+    expect(run_id).not.toBe(first.run_id);
+    expect(session_id).toBe(first.session_id);
+    // Pesan run lanjutan membawa prompt asli + instruksi "jangan mulai
+    // dari awal" (panggilan chat ke-4 = run baru yang pertama). Tunggu
+    // run lanjutan selesai dulu — panggilan chat-nya jalan asinkron
+    // setelah POST resume kembali.
+    const events2 = parseSse(
+      await (await fetch(`${url}/api/runs/${run_id}/events`)).text(),
+    );
+    expect(events2.at(-1)).toMatchObject({
+      type: "run_finished",
+      status: "completed",
+    });
+    const resumedMessages = JSON.stringify(seen[3]);
+    expect(resumedMessages).toContain("buat halaman");
+    expect(resumedMessages).toContain("JANGAN mulai dari awal");
+    expect(resumedMessages).toContain("titik berhentinya");
+    // Resume berantai tidak menumpuk instruksi lanjutan.
+    const resumed2 = await post(`${url}/api/runs/${run_id}/resume`, {});
+    expect(resumed2.status).toBe(409); // completed tidak bisa dilanjutkan
+  });
+
+  it("resumes an errored run", async () => {
+    const seen: unknown[] = [];
+    const llm = recording(
+      [
+        withCalls(plan("t0")),
+        withCalls(
+          call("t1", "write_file", {
+            path: "index.html",
+            content: "<h1>Kopi</h1>",
+          }),
+        ),
+        async () => {
+          throw new Error("provider meledak");
+        },
+        withCalls(plan("t2")),
+        finalText("Lanjut selesai."),
+      ],
+      seen,
+    );
+    const { url } = await boot([], {}, llm);
+    const first = (await (
+      await post(`${url}/api/runs`, { message: "buat halaman" })
+    ).json()) as { run_id: string; session_id: string };
+    const events1 = parseSse(
+      await (await fetch(`${url}/api/runs/${first.run_id}/events`)).text(),
+    );
+    expect(events1.at(-1)).toMatchObject({
+      type: "run_finished",
+      status: "error",
+    });
+    expect((await post(`${url}/api/runs/${first.run_id}/resume`, {})).status).toBe(
+      201,
     );
   });
 

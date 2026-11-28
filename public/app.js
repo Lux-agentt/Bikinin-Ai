@@ -2185,7 +2185,7 @@ function handle(e) {
       if (state.replaying) break;
       renderDiffs();
       void finishRunLive(e);
-      if (e.status === "budget_exceeded" && e.resumable) showResume(e.run_id);
+      if (e.resumable) showResume(e.run_id, e.status);
       break;
     }
 
@@ -2534,14 +2534,23 @@ async function stopRun() {
 // Lanjutkan run yang berhenti karena batas: server membuat run baru di sesi
 // yang sama dengan batas baru; riwayat sesi sudah berisi transkrip run lama,
 // jadi agent meneruskan dari titik berhentinya.
-function showResume(runId) {
+function showResume(runId, status) {
   if (!runId) return;
   state.lastRunId = runId;
   const wrap = document.createElement("div");
   wrap.className = "resume-wrap";
   const note = document.createElement("small");
+  // Catatan menyesuaikan kenapa run berhenti — intinya sama: lanjutkan
+  // dari yang sudah dikerjakan, bukan mulai dari awal (aturan user
+  // 2026-11-28). Sebelumnya tombol ini cuma muncul untuk budget_exceeded,
+  // jadi run yang dihentikan/error memaksa pengguna kirim pesan baru dan
+  // agent sering mengulang pekerjaan dari nol.
   note.textContent =
-    "Batas langkah/biaya habis. Lanjutkan dengan batas baru — agent meneruskan dari riwayat sesi ini.";
+    status === "budget_exceeded"
+      ? "Batas langkah/biaya habis. Lanjutkan dengan batas baru — agent meneruskan dari riwayat sesi ini."
+      : status === "stopped"
+        ? "Run dihentikan di tengah jalan. Lanjutkan — agent meneruskan dari yang sudah dikerjakan, bukan mulai dari awal."
+        : "Run berhenti karena error. Lanjutkan — agent meneruskan dari yang sudah dikerjakan, bukan mulai dari awal.";
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "btn primary";

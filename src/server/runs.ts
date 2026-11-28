@@ -43,6 +43,16 @@ import {
   readSessionEvents,
   type EventLog,
 } from "./event-log.js";
+
+/**
+ * Pesan lanjutan yang ditempel ke prompt asli saat sebuah run dilanjutkan
+ * (resume): tanpa ini model membaca riwayat + instruksi yang sama dan
+ * sering mengulang pekerjaan dari awal — baca ulang file, tulis ulang
+ * file yang sudah selesai. Aturan user 2026-11-28: kalau kerjaan berhenti,
+ * lanjutkan dari yang sudah dikerjakan, jangan mulai dari awal.
+ */
+export const CONTINUE_SUFFIX =
+  "\n\n[Lanjutkan run sebelumnya yang berhenti di tengah jalan — JANGAN mulai dari awal. Periksa dulu file di workspace dan riwayat di atas untuk melihat langkah mana yang sudah selesai, lalu lanjutkan dari titik berhentinya. Jangan tulis ulang file yang sudah selesai kecuali ada yang salah.]";
 import {
   createCheckpoint,
   listCheckpoints,
@@ -525,10 +535,13 @@ export class RunManager {
   }
 
   /**
-   * Continues a run that ended with budget_exceeded, with a fresh step/cost
-   * budget (§8.4). The session history already holds the previous run's
-   * transcript, so the new run picks up where the old one stopped. The
-   * caller maps the error to HTTP: not-found → 404, the rest → 409.
+   * Continues a run that ended mid-work (budget_exceeded, stopped, or
+   * error), with a fresh step/cost budget (§8.4). The session history
+   * already holds the previous run's transcript, so the new run picks up
+   * where the old one stopped — and the prompt carries CONTINUE_SUFFIX so
+   * the model does not redo finished steps. A completed run is NOT
+   * resumable (its work is done; starting over is a new task). The caller
+   * maps the error to HTTP: not-found → 404, the rest → 409.
    */
   resume(
     runId: string,
@@ -544,14 +557,20 @@ export class RunManager {
     if (
       !old.finished ||
       last?.type !== "run_finished" ||
-      last.status !== "budget_exceeded"
+      !["budget_exceeded", "stopped", "error"].includes(last.status)
     )
       return { error: "not-resumable" };
     // Resume keeps the original run's provider and order: no re-routing
-    // mid-session, so a resumed run never silently switches models.
+    // mid-session, so a resumed run never silently switches models. The
+    // stored message stays the original prompt; the continuation note is
+    // appended only if it is not already there (chained resumes must not
+    // stack it).
+    const message = old.message.includes(CONTINUE_SUFFIX)
+      ? old.message
+      : old.message + CONTINUE_SUFFIX;
     return this.beginRun(
       old.sessionId,
-      old.message,
+      message,
       old.provider,
       old.effort,
       undefined,
@@ -789,7 +808,7 @@ export class RunManager {
             cost_usd: 0,
           },
           duration_ms: 0,
-          resumable: false,
+          resumable: true,
         });
       }
     }

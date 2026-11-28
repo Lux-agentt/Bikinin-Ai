@@ -187,6 +187,28 @@ describe("stop membebaskan UI yang macet", () => {
     );
     expect(js).toMatch(/toast\("Koneksi ke server putus/);
   });
+
+  it("stop yang berhasil langsung menutup blok think (tidak tunggu run_finished)", () => {
+    expect(js).toMatch(
+      /toast\("Agent dihentikan\."\)/,
+    );
+    expect(js).toMatch(
+      /if \(state\.think\) finishThink\("stopped", state\.think\.count\);/,
+    );
+  });
+});
+
+describe("lanjutkan run yang berhenti (bukan mulai dari awal)", () => {
+  it("tombol Lanjutkan muncul untuk semua run yang bisa dilanjutkan", () => {
+    expect(js).toContain("if (e.resumable) showResume(e.run_id, e.status);");
+    expect(js).toContain("function showResume(runId, status) {");
+  });
+
+  it("catatan Lanjutkan menjelaskan: meneruskan, bukan mulai dari awal", () => {
+    expect(js).toContain("Run dihentikan di tengah jalan. Lanjutkan");
+    expect(js).toContain("Run berhenti karena error. Lanjutkan");
+    expect(js).toContain("bukan mulai dari awal");
+  });
 });
 
 describe("tab Eval di folder sheet", () => {
