@@ -1307,6 +1307,23 @@ main::-webkit-scrollbar {
 .agent-explain p {
   margin-bottom: 8px;
 }
+/* Video hasil render yang ditempel di dalam chat (bukan cuma nama file). */
+.chat-video {
+  margin: 10px 0 4px;
+}
+.chat-video video {
+  width: 100%;
+  border-radius: 10px;
+  background: #000;
+  display: block;
+}
+.chat-video-cap {
+  margin-top: 4px;
+  font-size: 12px;
+}
+.chat-video-cap a {
+  color: #8fb4ff;
+}
 .agent-explain p:last-child {
   margin-bottom: 0;
 }

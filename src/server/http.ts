@@ -178,6 +178,7 @@ async function serveDownload(
   res: ServerResponse,
   workspace: string,
   rawPath: string,
+  inline = false,
 ): Promise<void> {
   let rel: string;
   try {
@@ -203,10 +204,14 @@ async function serveDownload(
   // No size cap (unlike preview/zip): a rendered video is routinely
   // larger than 5 MB. Stream it instead of buffering it in memory.
   const filename = basename(abs).replace(/["\r\n]/g, "");
+  // ?inline=1: tampilkan di tempat (mis. <video> di dalam chat) — tanpa
+  // ini browser mengunduh. Default tetap attachment supaya tombol Unduh
+  // di tab Files tidak berubah perilakunya.
+  const disposition = inline ? "inline" : "attachment";
   res.writeHead(200, {
     "Content-Type":
       MIME[extname(abs).toLowerCase()] ?? "application/octet-stream",
-    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Content-Disposition": `${disposition}; filename="${filename}"`,
     "Content-Length": String(st.size),
     "Cache-Control": "no-store",
     ...SECURITY_HEADERS,
@@ -413,9 +418,15 @@ async function route(
     if (action === "/download") {
       // Single-file download (e.g. a rendered video): unlike the zip,
       // there is no 5 MB per-file cap — the file streams straight out.
+      // ?inline=1 serves it for in-page playback instead of downloading.
       const rawPath = url.searchParams.get("path");
       if (!rawPath) throw new HttpError(400, "path tidak diberikan");
-      return serveDownload(res, workspace, rawPath);
+      return serveDownload(
+        res,
+        workspace,
+        rawPath,
+        url.searchParams.get("inline") === "1",
+      );
     }
     // download.zip: the whole current workspace (shared by all sessions).
     const entries: Array<{ path: string; data: Buffer }> = [];

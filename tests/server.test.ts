@@ -1081,6 +1081,21 @@ describe("web server", () => {
       new Uint8Array(video),
     );
 
+    // ?inline=1: Content-Disposition inline (untuk <video> di dalam chat),
+    // bukan attachment — MIME dan isinya sama.
+    const inline = await fetch(
+      `${url}/api/sessions/${session_id}/download?path=${encodeURIComponent("out/video.mp4")}&inline=1`,
+    );
+    expect(inline.status).toBe(200);
+    expect(inline.headers.get("content-type")).toBe("video/mp4");
+    expect(inline.headers.get("content-disposition")).toContain("inline;");
+    expect(inline.headers.get("content-disposition")).not.toContain(
+      "attachment",
+    );
+    expect(new Uint8Array(await inline.arrayBuffer())).toEqual(
+      new Uint8Array(video),
+    );
+
     // No 5 MB cap here (unlike the zip): a 6 MB file streams out fine.
     const bigDl = await fetch(
       `${url}/api/sessions/${session_id}/download?path=big.bin`,

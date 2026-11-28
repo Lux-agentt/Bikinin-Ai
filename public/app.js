@@ -260,8 +260,56 @@ function renderBlock(b) {
   }
 }
 
+// ---------- Inline video in chat ----------
+// Hasil render_video (dan file video lain yang disebut di teks jawaban)
+// langsung bisa diputar di dalam chat: player <video> ditempel di bawah
+// teks. Sebelumnya video cuma muncul sebagai nama file — pemilik tidak
+// pernah melihat hasil rendernya (laporan 2026-11-28). Path harus relatif
+// ke workspace (mis. out/scene6.mp4); URL http(s) dan path absolut tidak
+// pernah jadi player, supaya tidak ada konten luar yang ikut ke-render.
+function videoPathsIn(raw) {
+  const found = [];
+  const re =
+    /(?:^|[\s`"'(\[])([A-Za-z0-9_][A-Za-z0-9_.\-/]*\.(?:mp4|webm|mov))(?=[\s`"'.,)\]]|$)/g;
+  let m;
+  while ((m = re.exec(String(raw ?? ""))) !== null) {
+    const p = m[1];
+    if (p.includes("://") || p.startsWith("/") || found.includes(p)) continue;
+    found.push(p);
+    if (found.length >= 2) break; // maks 2 player per pesan
+  }
+  return found;
+}
+
+function appendVideoPlayers(target, raw) {
+  if (!state.sessionId) return;
+  for (const p of videoPathsIn(raw)) {
+    const wrap = document.createElement("div");
+    wrap.className = "chat-video";
+    const v = document.createElement("video");
+    v.controls = true;
+    v.playsInline = true;
+    v.preload = "metadata";
+    v.src =
+      `/api/sessions/${state.sessionId}/download?path=` +
+      encodeURIComponent(p) +
+      "&inline=1";
+    const cap = document.createElement("div");
+    cap.className = "chat-video-cap";
+    const a = document.createElement("a");
+    a.href =
+      `/api/sessions/${state.sessionId}/download?path=` +
+      encodeURIComponent(p);
+    a.textContent = p + " — Unduh";
+    cap.appendChild(a);
+    wrap.append(v, cap);
+    target.appendChild(wrap);
+  }
+}
+
 function renderMarkdown(target, raw) {
   target.replaceChildren(...parseBlocks(raw).map(renderBlock));
+  appendVideoPlayers(target, raw);
 }
 
 // ---------- Hero: liquid folders (canvas only, from the studio design) ----------
