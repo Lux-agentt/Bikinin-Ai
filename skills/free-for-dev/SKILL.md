@@ -1,8 +1,8 @@
 ---
 name: free-for-dev
+category: lainnya
 description: Cari layanan gratis — hosting, API, AI, domain, database — dari daftar free-for-dev; pakai saat user butuh layanan gratis atau tanya opsi gratis.
 ---
-
 # Free-for-Dev
 
 Daftar layanan (SaaS/PaaS/IaaS) dengan free tier: https://github.com/ripienaar/free-for-dev — 57 bagian, dirawat 1600+ kontributor. Daftar ini hanya berisi layanan as-a-Service dengan free tier beneran (bukan cuma trial). Daftarnya bisa basi; free tier vendor bisa berubah atau dicabut sewaktu-waktu.

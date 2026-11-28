@@ -1,10 +1,10 @@
 ---
 name: uncloud
+category: devops-infra
 description: Use when managing an Uncloud cluster — deploying services, configuring Caddy ingress, adding static proxy routes for non-cluster devices, publishing ports, scaling, inspecting logs, or managing machines and volumes with the `uc` CLI.
 metadata:
   origin: ECC
 ---
-
 # Uncloud Cluster Management
 
 Reference for the `uc` CLI — a decentralised self-hosting platform using Docker containers, WireGuard mesh networking, and Caddy reverse proxy.

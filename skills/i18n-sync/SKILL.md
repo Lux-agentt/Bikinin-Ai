@@ -1,10 +1,10 @@
 ---
 name: i18n-sync
+category: lainnya
 description: "Translate and synchronize application JSON locale files using source-key usage, project terminology, and focused validation. Use when adding keys or languages, updating source copy, or reviewing missing and stale translations."
 metadata:
   origin: community
 ---
-
 # i18n Sync
 
 Translate application locale files by reading where each string appears in the

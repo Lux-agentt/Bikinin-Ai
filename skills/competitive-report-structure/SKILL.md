@@ -1,8 +1,8 @@
 ---
 name: competitive-report-structure
+category: bisnis-ops
 description: Assemble scored competitor profile cards (from benchmark-methodology) into a decision-grade competitive report with landscape map, competitor tiers, benchmarking matrix, white-space analysis, strategic recommendations, and team alignment trigger questions. Use when presenting competitive findings to leadership or a board, writing a competitive landscape report, or as the final step of the competitive analysis pipeline.
 ---
-
 # Competitive Report Structure
 
 Use this skill to assemble scored competitor cards into a decision-grade report.

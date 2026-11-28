@@ -1,10 +1,10 @@
 ---
 name: investor-outreach
+category: bisnis-ops
 description: Draft cold emails, warm intro blurbs, follow-ups, update emails, and investor communications for fundraising. Use when the user wants outreach to angels, VCs, strategic investors, or accelerators and needs concise, personalized, investor-facing messaging.
 metadata:
   origin: ECC
 ---
-
 # Investor Outreach
 
 Write investor communication that is short, concrete, and easy to act on.

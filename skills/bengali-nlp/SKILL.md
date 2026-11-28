@@ -1,10 +1,10 @@
 ---
 name: bengali-nlp
+category: lainnya
 description: Bengali (Bangla) text processing patterns including Unicode normalization, script detection, tokenization, conjunct handling, and Bangla-specific NLP best practices for AI applications.
 metadata:
   origin: ECC
 ---
-
 # Bengali (Bangla) NLP Patterns
 
 Best practices for processing, storing, and displaying Bengali text in software applications and AI systems.

@@ -1,5 +1,6 @@
 ---
 name: inventory-demand-planning
+category: bisnis-ops
 description: "Codified demand planning expertise for multi-location retailers: demand forecasting method selection, ABC/XYZ segmentation, safety stock and reorder-point optimization, promotional lift and post-promo dip estimation, and seasonal transition and markdown timing. Use when forecasting demand, setting safety stock, planning replenishment, managing promotions, or optimizing inventory levels."
 license: Apache-2.0
 homepage: https://github.com/affaan-m/ECC
@@ -10,7 +11,6 @@ metadata:
   clawdbot:
     emoji: ""
 ---
-
 # Inventory Demand Planning
 
 ## Role and Context

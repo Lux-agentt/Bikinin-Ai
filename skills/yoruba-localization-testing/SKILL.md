@@ -1,9 +1,9 @@
 ---
 name: yoruba-localization-testing
+category: lainnya
 description: Test Yoruba (yo) and English bilingual interfaces for tone marks, underdots, Unicode normalization, translation fallback, and accessibility.
 origin: ECC
 ---
-
 # Yoruba Localization Testing
 
 Use this skill when implementing or reviewing **Yoruba–English** interfaces. It targets correctness of Yoruba typography, message handling, and user experience, rather than providing automatically approved translations. It complements `i18n-sync` (message parity) and `accessibility` (assistive technology support).

@@ -1,5 +1,6 @@
 ---
 name: production-scheduling
+category: bisnis-ops
 description: Codified expertise for production scheduling, job sequencing, line balancing, changeover optimization, and bottleneck resolution in discrete and batch manufacturing. Informed by production schedulers with 15+ years experience. Includes TOC/drum-buffer-rope, SMED, OEE analysis, disruption response frameworks, and ERP/MES interaction patterns. Use when scheduling production, resolving bottlenecks, optimizing changeovers, responding to disruptions, or balancing manufacturing lines.
 license: Apache-2.0
 homepage: https://github.com/affaan-m/ECC
@@ -10,7 +11,6 @@ metadata:
   clawdbot:
     emoji: ""
 ---
-
 # Production Scheduling
 
 ## Role and Context

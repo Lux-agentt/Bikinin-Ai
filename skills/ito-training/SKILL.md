@@ -1,11 +1,11 @@
 ---
 name: ito-training
+category: data-ml
 description: Inspect the availability of ML training on a completed Itô compute booking and, when the canonical backend becomes available, hand off an explicitly confirmed training manifest. Use after ito-compute has booked GPU nodes and the user wants pre-training, fine-tuning, or RL on that metal. ECC implements no training stack of its own.
 metadata:
   origin: ECC
   status: scaffold
 ---
-
 # Itô Training
 
 `ito-training` is the canonical ECC skill for training on Itô compute. ECC

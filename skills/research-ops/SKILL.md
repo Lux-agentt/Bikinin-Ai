@@ -1,10 +1,10 @@
 ---
 name: research-ops
+category: data-ml
 description: Evidence-first current-state research workflow for ECC. Use when the user wants fresh facts, comparisons, enrichment, or a recommendation built from current public evidence and any supplied local context.
 metadata:
   origin: ECC
 ---
-
 # Research Ops
 
 Use this when the user asks to research something current, compare options, enrich people or companies, or turn repeated lookups into a monitored workflow.

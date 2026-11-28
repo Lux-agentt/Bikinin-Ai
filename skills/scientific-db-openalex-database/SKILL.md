@@ -1,10 +1,10 @@
 ---
 name: scientific-db-openalex-database
+category: data-ml
 description: OpenAlex REST API workflows for cross-disciplinary literature search, DOI/PMID lookup, open-access links, citation counts, and reproducible search logs. Use when a task needs scholarly works from every field (not only biomedicine), or needs to resolve a DOI, PMID or OpenAlex ID to full metadata.
 metadata:
   origin: OpenAlex
 ---
-
 # OpenAlex Database
 
 Use this skill when a task needs scholarly literature across all disciplines, or

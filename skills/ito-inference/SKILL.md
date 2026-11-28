@@ -1,12 +1,12 @@
 ---
 name: ito-inference
+category: data-ml
 description: Inspect the availability of model serving on a completed Itô compute booking and, when the canonical backend becomes available, hand off an explicitly confirmed serving manifest. Use after ito-compute has booked GPU nodes and the user asks for an OpenAI-compatible endpoint, ito-serve, hosted Kimi, or self-hosted open-weights inference. ECC implements no serving stack of its own.
 metadata:
   origin: ECC
   status: scaffold
   aliases: ito-serve, hosted-open-weights
 ---
-
 # Itô Inference
 
 `ito-inference` is the sole canonical ECC skill for inference serving on Itô

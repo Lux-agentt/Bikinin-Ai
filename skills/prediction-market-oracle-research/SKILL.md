@@ -1,10 +1,10 @@
 ---
 name: prediction-market-oracle-research
+category: data-ml
 description: Research prediction markets as data sources or oracle signals for products, agents, dashboards, and corporate decision intelligence. Use for source-grounded analysis of market-implied probabilities, caveats, and integration patterns without investment advice. Use when evaluating prediction markets as a data source or oracle signal for a product, agent, or dashboard.
 metadata:
   origin: ECC
 ---
-
 # Prediction Market Oracle Research
 
 Use this skill when prediction markets are being considered as a data source,

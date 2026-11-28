@@ -1,10 +1,10 @@
 ---
 name: homelab-pihole-dns
+category: devops-infra
 description: Pi-hole installation, blocklist management, DNS-over-HTTPS setup, DHCP integration, local DNS records, and troubleshooting broken DNS resolution on a home network. Use when the task explicitly involves Pi-hole — installing it, managing blocklists, configuring DoH or DHCP, adding local DNS records, or diagnosing DNS resolution with Pi-hole in the path.
 metadata:
   origin: community
 ---
-
 # Homelab Pi-hole DNS
 
 Pi-hole is a network-wide DNS ad blocker that runs on a Raspberry Pi or any Linux host.

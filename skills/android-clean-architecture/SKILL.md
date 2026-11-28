@@ -1,10 +1,10 @@
 ---
 name: android-clean-architecture
+category: mobile-desktop
 description: Clean Architecture patterns for Android and Kotlin Multiplatform projects — module structure, dependency rules, UseCases, Repositories, and data layer patterns. Use when structuring modules, layers, or data flow in an Android or KMP project.
 metadata:
   origin: ECC
 ---
-
 # Android Clean Architecture
 
 Clean Architecture patterns for Android and KMP projects. Covers module boundaries, dependency inversion, UseCase/Repository patterns, and data layer design with Room, SQLDelight, and Ktor.

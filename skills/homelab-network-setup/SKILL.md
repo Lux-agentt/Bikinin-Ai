@@ -1,10 +1,10 @@
 ---
 name: homelab-network-setup
+category: devops-infra
 description: Practical home and homelab network planning for gateways, switches, access points, IP ranges, DHCP reservations, DNS, cabling, and common beginner mistakes. Use when planning or fixing a home or homelab network — gateway, switch, AP, IP ranges, DHCP, DNS, or cabling.
 metadata:
   origin: community
 ---
-
 # Homelab Network Setup
 
 Use this skill to design a home or small-lab network that can grow without

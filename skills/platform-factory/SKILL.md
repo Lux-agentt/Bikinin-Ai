@@ -1,10 +1,10 @@
 ---
 name: platform-factory
+category: devops-infra
 description: Build deterministic OCI images, SBOM/provenance evidence and hardened container or microVM runs from a compiled executable with the Platform Factory (pf) CLI, and keep its freeze lock in sync with a companion Claude Code hook. Use when a project contains .platform-factory/, when the user runs or asks about pf/platform-factory (detect, plan, freeze, build, verify, run, launch), or wants reproducible OCI builds without a Docker daemon.
 metadata:
   origin: community
 ---
-
 # Platform Factory
 
 [Platform Factory](https://github.com/CYPT71/platform-factory) (`platform-factory`, alias `pf`) is a single Go binary that turns a compiled executable into a deterministic OCI image, attaches native supply-chain evidence (SBOM, provenance, signatures, policy) and runs the result as a hardened container or a KVM/HVF microVM. No Docker daemon, BuildKit, syft or cosign is needed for the core path. It plugs into an existing stack; it does not replace Kubernetes, CI orchestrators or registries.

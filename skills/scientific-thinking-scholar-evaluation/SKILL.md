@@ -1,10 +1,10 @@
 ---
 name: scientific-thinking-scholar-evaluation
+category: data-ml
 description: Structured scholarly-work evaluation for papers, proposals, literature reviews, methods sections, evidence quality, citation support, and research-writing feedback. Use when evaluating academic or scientific work — papers, proposals, methods sections, or evidence quality — against a repeatable rubric.
 metadata:
   origin: community
 ---
-
 # Scholar Evaluation
 
 Use this skill to evaluate academic or scientific work with a repeatable rubric.

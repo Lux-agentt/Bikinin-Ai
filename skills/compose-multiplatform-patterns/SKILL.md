@@ -1,10 +1,10 @@
 ---
 name: compose-multiplatform-patterns
+category: mobile-desktop
 description: Compose Multiplatform and Jetpack Compose patterns for KMP projects — state management, navigation, theming, performance, and platform-specific UI. Use when building Compose or Jetpack Compose UI, state, navigation, or theming in a KMP project.
 metadata:
   origin: ECC
 ---
-
 # Compose Multiplatform Patterns
 
 Patterns for building shared UI across Android, iOS, Desktop, and Web using Compose Multiplatform and Jetpack Compose. Covers state management, navigation, theming, and performance.

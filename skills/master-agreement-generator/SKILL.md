@@ -1,8 +1,8 @@
 ---
 name: master-agreement-generator
+category: bisnis-ops
 description: Generate review drafts of counterparty master agreements from one template plus a JSON spec, with role-selected clauses and a Schedule A workflow limited to the executed agreement's notice authority. Use when you need reproducible drafting and separately reviewed execution preparation.
 ---
-
 # Master Agreement Generator
 
 One master template, one small spec per counterparty, one draft build step.

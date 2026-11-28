@@ -1,11 +1,11 @@
 ---
 name: story-lifecycle
+category: produk-perencanaan
 description: Manage a file-based epic → story → sprint development loop without requiring an external project management tool. Creates and tracks epics, breaks them into user stories, assigns them to sprints, and drives implementation story by story. Use when starting a new feature initiative or when the team has no Jira/Linear/Taiga but needs structured delivery tracking.
 metadata:
   origin: community
   inspired-by: bmad-method (bmad-create-epics-and-stories, bmad-dev-story, bmad-sprint-planning)
 ---
-
 # Story Lifecycle
 
 A self-contained, file-based delivery loop: **Epic → Stories → Sprint → Implement → Done**.

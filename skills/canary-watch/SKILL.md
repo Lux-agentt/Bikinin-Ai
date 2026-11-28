@@ -1,10 +1,10 @@
 ---
 name: canary-watch
+category: devops-infra
 description: Monitors and verifies deployed URLs after releases by checking HTTP endpoints, SSE streams, static assets, console errors, and performance regressions after deploys, merges, or dependency upgrades. Smoke, canary, and post-deploy verification.
 metadata:
   origin: ECC
 ---
-
 # Canary Watch — Post-Deploy Monitoring
 
 ## When to Use

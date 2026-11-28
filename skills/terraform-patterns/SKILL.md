@@ -1,10 +1,10 @@
 ---
 name: terraform-patterns
+category: devops-infra
 description: Terraform and OpenTofu infrastructure-as-code patterns for project layout, remote state, modules, variables, secrets, safe plan/apply workflows, and CI. Use when writing or reviewing .tf files, structuring modules or environments, configuring backends and state locking, or debugging plan drift, state, and provider errors.
 metadata:
   origin: ECC
 ---
-
 # Terraform Patterns
 
 Production-grade Terraform (and OpenTofu) patterns for writing infrastructure code that is reviewable, repeatable, and safe to apply.

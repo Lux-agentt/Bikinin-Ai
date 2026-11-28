@@ -1,10 +1,10 @@
 ---
 name: scientific-thinking-literature-review
+category: data-ml
 description: Systematic literature-review workflow for academic, biomedical, technical, and scientific topics, including search planning, source screening, synthesis, citation checks, and evidence logging. Use when the task is to find, screen, synthesize, and cite a body of academic or technical literature.
 metadata:
   origin: community
 ---
-
 # Literature Review
 
 Use this skill when the task is to find, screen, synthesize, and cite a body of

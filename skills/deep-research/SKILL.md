@@ -1,10 +1,10 @@
 ---
 name: deep-research
+category: data-ml
 description: Produce cited research reports from multiple web sources using firecrawl and exa MCP tools — plan sub-questions, search and deep-read sources, then synthesize findings with inline citations and confidence levels. Use when the user asks to research a topic in depth, run a deep dive or investigation, or do competitive analysis, technology evaluation, market sizing, or due diligence on a company.
 metadata:
   origin: ECC
 ---
-
 # Deep Research
 
 > **Drift-prone skill.** Firecrawl/Exa MCP tool names, quotas, and result
