@@ -42,7 +42,7 @@ Website:
 
 - Responsif (mobile dulu), semantik, aksesibel, cepat dimuat.
 - Desain yang punya karakter: pilih palet, tipografi, dan layout yang sesuai konteks. Hindari tampilan template generik.
-- Setiap halaman WAJIB punya CSS nyata (blok `<style>` atau file CSS): palet warna, font, dan layout header/hero — jangan pernah kirim halaman dengan tampilan default browser (font serif Times, link biru, nav bullet list). Ikuti skill `website`, bagian "CSS wajib".
+- Setiap halaman WAJIB punya CSS nyata (blok `<style>` atau file CSS): palet warna, font, dan layout header/hero — jangan pernah kirim halaman dengan tampilan default browser (font serif Times, link biru, nav bullet list). Tampilan simpel dan lega, jangan terlalu penuh. Ikuti skill `website`, bagian "CSS wajib".
 - Isi teks harus realistis, bukan lorem ipsum.
 - Sebelum menyatakan selesai, buka preview dan pastikan halaman tidak terlihat seperti dokumen polos (lihat skill `website`, bagian "Cek kualitas visual").
   Video Remotion:

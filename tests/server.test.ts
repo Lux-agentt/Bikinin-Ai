@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Config } from "../src/config.js";
-import { AgentEvent } from "../src/events.js";
+import { AgentEvent, toNDJSON } from "../src/events.js";
 import type { ChatResult, LlmClient, ToolCallReq } from "../src/llm/client.js";
 import { createAppServer } from "../src/server/http.js";
 import { RunManager } from "../src/server/runs.js";
@@ -370,6 +370,109 @@ describe("web server", () => {
     expect(detail.runs[0].events.some((e) => e.type === "file_changed")).toBe(
       true,
     );
+  });
+
+  it("recovers a session from the .jsonl log when the .json snapshot is missing", async () => {
+    const base = await mkdtemp(join(tmpdir(), "bikinin-recover-"));
+    await mkdir(join(base, "ws", ".bikinin", "sessions"), {
+      recursive: true,
+    });
+    const workspace = await realpath(join(base, "ws"));
+    const started = AgentEvent.parse({
+      v: 1,
+      seq: 0,
+      ts: "2026-11-28T02:00:00.000Z",
+      run_id: "run_aaaa0001",
+      type: "run_started",
+      session_id: "s_aaaa0001",
+      model: "test-model",
+      effort: "sedang",
+      user_message: "Buatkan landing page kedai kopi",
+      limits: { max_steps: 10, max_cost_usd: 1 },
+    });
+    const finished = AgentEvent.parse({
+      v: 1,
+      seq: 1,
+      ts: "2026-11-28T02:05:00.000Z",
+      run_id: "run_aaaa0001",
+      type: "run_finished",
+      status: "completed",
+      summary: "Selesai.",
+      totals: {
+        steps: 1,
+        input_tokens: 100,
+        output_tokens: 20,
+        cached_tokens: 0,
+        cost_usd: 0,
+      },
+      duration_ms: 100,
+      resumable: false,
+    });
+    await writeFile(
+      join(workspace, ".bikinin", "sessions", "s_aaaa0001.jsonl"),
+      toNDJSON(started) + toNDJSON(finished),
+    );
+    const manager = new RunManager(cfg, {
+      workspace,
+      systemPrompt: "sys",
+      llm: scripted([finalText("x")]),
+    });
+    expect(await manager.init()).toBe(1);
+    const list = manager.listSessions();
+    expect(list).toHaveLength(1);
+    expect(list[0].session_id).toBe("s_aaaa0001");
+    expect(list[0].title).toBe("Buatkan landing page kedai kopi");
+    expect(list[0].prompts).toBe(1);
+    expect(list[0].runs).toBe(1);
+    expect(list[0].last_status).toBe("completed");
+    // The snapshot was rebuilt on disk, so a second init finds it via .json.
+    expect(
+      await exists(
+        join(workspace, ".bikinin", "sessions", "s_aaaa0001.json"),
+      ),
+    ).toBe(true);
+    expect(await manager.init()).toBe(0);
+  });
+
+  it("persists a session as soon as a run starts, even before it finishes", async () => {
+    const base = await mkdtemp(join(tmpdir(), "bikinin-persist-start-"));
+    await mkdir(join(base, "ws"));
+    const workspace = await realpath(join(base, "ws"));
+    const hanging: LlmClient = {
+      async chat() {
+        return new Promise<ChatResult>(() => {});
+      },
+    };
+    const manager = new RunManager(cfg, {
+      workspace,
+      systemPrompt: "sys",
+      llm: hanging,
+    });
+    await manager.init();
+    const server = createAppServer(manager, workspace);
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    open.push(
+      () =>
+        new Promise<void>((r) => {
+          server.closeAllConnections();
+          server.close(() => r());
+        }),
+    );
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const started = (await (
+      await post(`${url}/api/runs`, { message: "buat halaman" })
+    ).json()) as { run_id: string; session_id: string };
+    // The run is still hanging, yet the .json snapshot must already exist.
+    await waitFor(() =>
+      exists(
+        join(workspace, ".bikinin", "sessions", `${started.session_id}.json`),
+      ),
+    );
+    const list = (await (await fetch(`${url}/api/sessions`)).json()) as Array<{
+      session_id: string;
+    }>;
+    expect(list.some((s) => s.session_id === started.session_id)).toBe(true);
+    await post(`${url}/api/runs/${started.run_id}/stop`, {});
   });
 
   it("remembers earlier messages of the same session, and forgets for a new one", async () => {

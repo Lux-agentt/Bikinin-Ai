@@ -35,6 +35,7 @@ import {
   readLessonEntries,
   readMemoryEntries,
   saveSession,
+  sessionsDirPath,
   type PersistedSession,
 } from "./persistence.js";
 import {
@@ -56,6 +57,7 @@ import {
   type RunLedger,
 } from "./ledger.js";
 import { MAX_SESSIONS, SessionHistory } from "../agent/history.js";
+import { rebuildHistory } from "../agent/replay.js";
 import { buildLessonsContext, extractLessons } from "../agent/lessons.js";
 import {
   buildMemoryContext,
@@ -166,9 +168,84 @@ export class RunManager {
       });
       restored++;
     }
+    // Sessions whose .json snapshot is gone but whose .jsonl event log
+    // survived (a run that never finished, or a crash before persist):
+    // rebuild the snapshot from the log so the session comes back.
+    restored += await this.recoverSessionsFromLogs();
     // Enforce the cap on disk too (a previous process may have left extras).
     await pruneSessions(this.opts.workspace, MAX_SESSIONS).catch(() => {});
     return restored;
+  }
+
+  /**
+   * Rebuilds the .json snapshot of any session whose .jsonl event log
+   * survived without one. Without this, such a session is invisible in
+   * history even though its events — and its files — are still on disk.
+   * Returns how many sessions were recovered.
+   */
+  private async recoverSessionsFromLogs(): Promise<number> {
+    let names: string[];
+    try {
+      names = await readdir(sessionsDirPath(this.opts.workspace));
+    } catch {
+      return 0;
+    }
+    let recovered = 0;
+    for (const name of names) {
+      const m = /^(s_[a-f0-9]{8})\.jsonl$/.exec(name);
+      if (!m) continue;
+      const sessionId = m[1];
+      if (this.sessions.has(sessionId)) continue;
+      const events = await readSessionEvents(this.opts.workspace, sessionId);
+      if (events.length === 0) continue;
+      const runIds = [
+        ...new Set(
+          events
+            .filter((e) => e.type === "run_started")
+            .map((e) => e.run_id),
+        ),
+      ];
+      if (runIds.length === 0) continue;
+      const first = events.find((e) => e.type === "run_started");
+      const lastFinished = [...events]
+        .reverse()
+        .find((e) => e.type === "run_finished");
+      const lastTs = events[events.length - 1]?.ts;
+      const parsed = lastTs ? Date.parse(lastTs) : Number.NaN;
+      const history = rebuildHistory(events);
+      const data: PersistedSession = {
+        version: 1,
+        session_id: sessionId,
+        title:
+          first && first.type === "run_started"
+            ? first.user_message
+            : sessionId,
+        prompts: runIds.length,
+        runs: runIds.length,
+        last_status:
+          lastFinished && lastFinished.type === "run_finished"
+            ? lastFinished.status
+            : null,
+        updated_at: Number.isNaN(parsed) ? Date.now() : parsed,
+        history: history.toJSON(),
+      };
+      try {
+        await saveSession(this.opts.workspace, data);
+      } catch {
+        continue;
+      }
+      this.sessions.set(sessionId, SessionHistory.fromJSON(data.history));
+      this.meta.set(sessionId, {
+        title: data.title,
+        prompts: data.prompts,
+        updatedAt: data.updated_at,
+        runIds,
+        runCount: data.runs,
+        lastStatus: data.last_status,
+      });
+      recovered++;
+    }
+    return recovered;
   }
 
   /** Public, non-secret settings for the UI. Never includes keys or URLs. */
@@ -491,6 +568,11 @@ export class RunManager {
         lastStatus: null,
       });
     }
+    // Durability: persist the session as soon as the run starts. The .json
+    // snapshot is what init() loads — a session whose run never finishes
+    // would otherwise stay invisible in history even though its .jsonl log
+    // exists. Fire-and-forget like the persist after run_finished.
+    void this.persistSession(sessionId).catch(() => {});
     const rec: RunRecord = {
       runId,
       sessionId,

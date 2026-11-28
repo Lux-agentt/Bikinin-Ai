@@ -54,6 +54,43 @@ describe("panel kode live saat run (kode asli, bukan placeholder)", () => {
   });
 });
 
+describe("panel kode live menampilkan rencana + tool yang sedang jalan", () => {
+  it("plan_updated juga tampil di panel kode (bukan cuma panel Todo)", () => {
+    expect(js).toMatch(
+      /case "plan_updated":[\s\S]*?renderPlan\(e\.items\)[\s\S]*?showCode\("Rencana", planBody\)/,
+    );
+  });
+
+  it("tool_call_started langsung menampilkan tool + argumen (tanpa tunggu selesai)", () => {
+    expect(js).toMatch(
+      /case "tool_call_started":[\s\S]*?thinkLine\(e\.call_id, e\.label\)[\s\S]*?formatToolCall\(e\.tool, e\.args\)[\s\S]*?showCode\(e\.tool === "update_plan" \? "Rencana" : e\.label, startedBody\)/,
+    );
+  });
+
+  it("update_plan diformat sebagai baris rencana, bukan JSON mentah", () => {
+    expect(js).toMatch(
+      /function formatToolCall\(tool, args\) \{[\s\S]*?if \(!args \|\| typeof args !== "object"\) return ""[\s\S]*?tool === "update_plan"[\s\S]*?return formatPlan\(args\.items\)/,
+    );
+    expect(js).toMatch(/function formatPlan\(items\) \{/);
+  });
+
+  it("formatPlan memakai tanda status yang sama dengan panel Todo + batas 2000", () => {
+    expect(js).toContain(
+      'const PLAN_MARKS = { done: "✓", doing: "›", pending: "○" }',
+    );
+    expect(js).toMatch(
+      /return capText\(lines\.join\("\\n"\), 2000\)/,
+    );
+  });
+
+  it("argumen tool dipotong per nilai (300) dan total (1500); argumen kosong aman", () => {
+    expect(js).toContain("capText(text, 300)");
+    expect(js).toMatch(
+      /return capText\(lines\.join\("\\n"\), 1500\)/,
+    );
+  });
+});
+
 describe("stop membebaskan UI yang macet", () => {
   it("stopRun mengenali run yang sudah hilang (404) dan mematikan busy", () => {
     expect(js).toMatch(

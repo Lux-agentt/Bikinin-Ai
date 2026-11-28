@@ -1230,6 +1230,41 @@ function showCode(title, body) {
   scrollDown();
 }
 
+/** Potong teks ke batas aman panel HP (tanpa mengubah isinya bila pendek). */
+function capText(s, max) {
+  const text = String(s ?? "");
+  return text.length > max ? text.slice(0, max) + "…" : text;
+}
+
+const PLAN_MARKS = { done: "✓", doing: "›", pending: "○" };
+
+/** Rencana sebagai teks baris-per-langkah (tanda status sama seperti panel Todo). */
+function formatPlan(items) {
+  if (!Array.isArray(items) || items.length === 0) return "";
+  const lines = items.map(
+    (it) => `${PLAN_MARKS[it.status] || "○"} ${it.text}`,
+  );
+  return capText(lines.join("\n"), 2000);
+}
+
+/** Argumen tool_call_started sebagai teks ringkas untuk panel.
+ *  update_plan diformat sebagai rencana (bukan JSON mentah); nilai argumen
+ *  dipotong per nilai (maks 300 karakter) dan total maks 1500 karakter.
+ *  Argumen di event sudah diredaksi server (tanpa rahasia, tanpa isi file). */
+function formatToolCall(tool, args) {
+  if (!args || typeof args !== "object") return "";
+  if (tool === "update_plan" && Array.isArray(args.items)) {
+    return formatPlan(args.items);
+  }
+  const lines = [];
+  for (const [key, value] of Object.entries(args)) {
+    const text =
+      typeof value === "string" ? value : JSON.stringify(value) ?? "";
+    lines.push(`${key}: ${capText(text, 300)}`);
+  }
+  return capText(lines.join("\n"), 1500);
+}
+
 function thinkLine(callId, text) {
   const t = state.think;
   if (!t) return;
@@ -1832,6 +1867,13 @@ function handle(e) {
     case "tool_call_started":
       state.explainEl = null; // text after a tool call starts a new block
       thinkLine(e.call_id, e.label);
+      // Panel langsung menampilkan tool + argumennya — jangan tunggu selesai.
+      {
+        const startedBody = formatToolCall(e.tool, e.args);
+        if (startedBody) {
+          showCode(e.tool === "update_plan" ? "Rencana" : e.label, startedBody);
+        }
+      }
       break;
 
     case "tool_call_finished": {
@@ -1882,6 +1924,10 @@ function handle(e) {
 
     case "plan_updated":
       renderPlan(e.items);
+      {
+        const planBody = formatPlan(e.items);
+        if (planBody) showCode("Rencana", planBody);
+      }
       break;
 
     case "checkpoint_created":
