@@ -187,7 +187,7 @@ export function classify(
       };
     }
     if (
-      /thought_signature|malformed tool call|could not be repaired/i.test(
+      /thought_signature|malformed|could not be repaired|partial response received/i.test(
         err.message,
       )
     ) {
@@ -201,6 +201,13 @@ export function classify(
       // refused it. (3) 2026-11-28: the same refusal from DeepSeek via
       // NanoGPT arrived WITHOUT an HTTP status ("tanpa status") — the old
       // `status === 400` guard let it kill the run instead of falling
+      // over. (4) 2026-11-28 13:09 WIB: "Partial response received, but
+      // the final tool call was malformed and was not executed" — also
+      // status-less, long run, sig:0 everywhere (not Gemini). The old
+      // pattern only matched the literal "malformed tool call", so this
+      // wording slipped through and killed the run. The pattern is now
+      // the bare word "malformed" plus the "partial response received"
+      // prefix, so any wording about a broken final tool call falls
       // over. In all cases retrying the same provider with the same
       // history fails again, but the next provider does not validate
       // signatures and samples fresh, so fall over instead of killing

@@ -175,6 +175,27 @@ describe("provider error detail", () => {
     expect(error.message).toContain("tanpa status");
   });
 
+  it("\"partial response ... tool call was malformed\" refusal without an HTTP status still falls over", () => {
+    // Live run 2026-11-28 13:09 WIB: after a long run the provider
+    // refused with "Partial response received, but the final tool call
+    // was malformed and was not executed" — NO HTTP status, sig:0
+    // everywhere (not Gemini). The push-46 pattern only matched the
+    // literal "malformed tool call", so this wording killed the run
+    // instead of falling over to the next provider.
+    const err = new APIError(
+      undefined,
+      undefined,
+      "Partial response received, but the final tool call was malformed and was not executed.",
+      undefined,
+    );
+    expect(err.status).toBeUndefined();
+    const { retryable, error } = classify(err);
+    expect(error).toBeInstanceOf(AgentError);
+    expect(error.fallback).toBe(true);
+    expect(retryable).toBe(false);
+    expect(error.message).toContain("tanpa status");
+  });
+
   it("a plain 400 without thought_signature still does not fall over", async () => {
     await withErrorServer(
       400,
