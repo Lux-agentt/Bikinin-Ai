@@ -1,10 +1,10 @@
 ---
 name: context-budget
+category: agent-harness
 description: Routes live context checks to the native Codex or Claude Code meter without scanning files, and performs a bounded static component audit only when explicitly requested. Use for context-budget requests about remaining capacity or installed context overhead.
 metadata:
   origin: ECC
 ---
-
 # Context Budget
 
 Use the provider's native meter for live session usage. Keep the separate,

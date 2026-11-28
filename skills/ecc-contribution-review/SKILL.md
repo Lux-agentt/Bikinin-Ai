@@ -1,10 +1,10 @@
 ---
 name: ecc-contribution-review
+category: agent-harness
 description: Prepare an ECC skill contribution for review by organizing repository, install-surface, cross-harness, validation, security, and commit observations into a local proposal. Use when preparing a skill contribution for review.
 metadata:
   origin: ECC
 ---
-
 # ECC Skill Contribution Review Packet
 
 Use this workflow to prepare skill contribution observations for maintainer review.

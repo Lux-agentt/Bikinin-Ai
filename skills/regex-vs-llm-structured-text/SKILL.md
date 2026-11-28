@@ -1,10 +1,10 @@
 ---
 name: regex-vs-llm-structured-text
+category: agent-harness
 description: Decision framework for parsing structured text (quizzes, forms, invoices, receipts, tables) with a hybrid regex-first pipeline — regex extraction handles 95%+ cheaply, a confidence scorer flags low-confidence items, and an LLM validator fixes only the edge cases. Use when choosing between regex and LLM for text extraction, building a cheap document parser, or optimizing extraction cost and accuracy.
 metadata:
   origin: ECC
 ---
-
 # Regex vs LLM for Structured Text Parsing
 
 A practical decision framework for parsing structured text (quizzes, forms, invoices, documents). The key insight: regex handles 95-98% of cases cheaply and deterministically. Reserve expensive LLM calls for the remaining edge cases.

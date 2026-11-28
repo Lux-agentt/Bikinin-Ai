@@ -1,11 +1,11 @@
 ---
 name: module-governance
+category: agent-harness
 description: >-
   Establish or maintain a business module's local agent instructions, domain-context links, and interface ownership when implementing a new module or changing its responsibilities. Reuse project-level rules and existing ECC workflows; ordinary bug fixes, styling, and read-only design discussions do not start module documentation setup.
 metadata:
   origin: ECC
 ---
-
 # Module Governance
 
 Connect module-level working rules to existing domain language, contracts, and

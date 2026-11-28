@@ -1,10 +1,10 @@
 ---
 name: agent-runtime-gateway-smoke-test
+category: agent-harness
 description: Verify a local agent API, temporary gateway tunnel, and remote sandbox callback with a tool-free task, then restore the original app connection.
 metadata:
   origin: ECC
 ---
-
 # Agent Runtime Gateway Smoke Test
 
 Use this workflow when an agent task runs in a remote sandbox that calls back to a local API through a gateway. It verifies the whole path without relying on connected tools or private production data.

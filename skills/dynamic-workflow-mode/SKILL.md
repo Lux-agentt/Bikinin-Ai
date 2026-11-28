@@ -1,10 +1,10 @@
 ---
 name: dynamic-workflow-mode
+category: agent-harness
 description: "Design task-local harnesses, eval gates, and reusable skill extraction for Claude dynamic workflow mode and other adaptive agent harnesses. Use when building a task-local harness, adding eval gates, or extracting a reusable skill from ad-hoc work."
 metadata:
   origin: ECC
 ---
-
 # Dynamic Workflow Mode
 
 Use this skill when a coding agent can generate or adapt a task-local harness instead of only following a static command flow. The goal is to turn dynamic workflow mode into a disciplined system: temporary harnesses for one-off work, shared skill extraction for repeated work, and observable control pane checkpoints for teams.

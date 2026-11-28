@@ -1,10 +1,10 @@
 ---
 name: rules-distill
+category: agent-harness
 description: "Scan skills to extract cross-cutting principles and distill them into rules — append, revise, or create new rule files. Use when the same principle keeps recurring across skills and belongs in a rule file instead."
 metadata:
   origin: ECC
 ---
-
 # Rules Distill
 
 Scan installed skills, extract cross-cutting principles that appear in multiple skills, and distill them into rules — appending to existing rule files, revising outdated content, or creating new rule files.

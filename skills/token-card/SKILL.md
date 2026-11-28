@@ -1,10 +1,10 @@
 ---
 name: token-card
+category: agent-harness
 description: Render a token-usage stat card from local Claude Code, Codex, Gemini CLI, and OpenCode session logs and commit it into the repository as a file. Use when someone wants a current usage figure in a README, or asks for a shareable card of their coding-agent activity.
 metadata:
   origin: community
 ---
-
 # Token Card
 
 Produce an SVG card summarising this machine's AI coding agent usage — total tokens,

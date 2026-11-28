@@ -1,10 +1,10 @@
 ---
 name: skill-scout
+category: agent-harness
 description: Search existing local, marketplace, GitHub, and web skill sources before creating a new skill. Use when the user wants to create, build, fork, or find a skill for a workflow.
 metadata:
   origin: community
 ---
-
 # Skill Scout
 
 Use this skill before creating a new skill. The goal is to avoid duplicating

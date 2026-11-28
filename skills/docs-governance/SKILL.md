@@ -1,10 +1,10 @@
 ---
 name: docs-governance
+category: agent-harness
 description: Route broad documentation-governance requests to existing ECC skills and run an opt-in, read-only audit of mapped documentation roles, links, ADR indexes, and evidence references. Use when a user asks for documentation governance, project-knowledge organization, documentation integrity, or a deterministic docs audit without naming a narrower skill.
 metadata:
   origin: ECC
 ---
-
 # Documentation Governance Router
 
 Use this optional router to select the smallest existing ECC capability for a

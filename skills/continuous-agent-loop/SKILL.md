@@ -1,10 +1,10 @@
 ---
 name: continuous-agent-loop
+category: agent-harness
 description: Patterns for continuous autonomous agent loops with quality gates, evals, and recovery controls. Use when running an agent loop that must self-check, gate on evals, and recover from failures.
 metadata:
   origin: ECC
 ---
-
 # Continuous Agent Loop
 
 This is the v1.8+ canonical loop skill name. It supersedes `autonomous-loops` while keeping compatibility for one release.

@@ -1,10 +1,10 @@
 ---
 name: agent-introspection-debugging
+category: agent-harness
 description: Structured self-debugging workflow for AI agent failures using capture, diagnosis, contained recovery, and introspection reports. Use when an agent run fails and you need a reproducible diagnosis instead of a retry.
 metadata:
   origin: ECC
 ---
-
 # Agent Introspection Debugging
 
 Use this skill when an agent run is failing repeatedly, consuming tokens without progress, looping on the same tools, or drifting away from the intended task.

@@ -1,12 +1,12 @@
 ---
 name: benchmark-optimization-loop
+category: agent-harness
 description: >-
   Turn a user's improvement goal into a bounded benchmark-guided loop: define success and hard constraints, establish a baseline, test one-hypothesis variants, and promote the best measured admissible result with reproducible commands. Use for repeated measured improvements to correctness, quality, task completion, reliability, speed, or cost, including recursive optimization and implementation comparisons.
 license: MIT
 metadata:
   origin: ECC
 ---
-
 # Benchmark Optimization Loop
 
 Start with what the user needs to accomplish, then choose the benchmark. A

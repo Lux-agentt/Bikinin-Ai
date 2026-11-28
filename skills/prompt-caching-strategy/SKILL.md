@@ -1,5 +1,6 @@
 ---
 name: prompt-caching-strategy
+category: agent-harness
 description: >-
   Optimize LLM prompt caching hit rate to reduce API costs and improve latency.
   Analyzes prompt structure, identifies cacheable vs non-cacheable content,
@@ -14,7 +15,6 @@ metadata:
   author: cyberspace-cs
   version: "1.0.0"
 ---
-
 # Prompt Caching Strategy
 
 Arrange reusable prompt content to improve cache reuse, then measure input cost

@@ -1,10 +1,10 @@
 ---
 name: agentic-engineering
+category: agent-harness
 description: Operate as an agentic engineer using eval-first execution, decomposition, and cost-aware model routing. Use when planning or executing engineering work that agents will carry out end to end.
 metadata:
   origin: ECC
 ---
-
 # Agentic Engineering
 
 Use this skill for engineering workflows where AI agents perform most implementation work and humans enforce quality and risk controls.

@@ -1,10 +1,10 @@
 ---
 name: cost-aware-llm-pipeline
+category: agent-harness
 description: Cost optimization patterns for LLM API usage — model routing by task complexity, budget tracking, retry logic, and prompt caching. Use when LLM spend needs to come down, or when routing tasks across model tiers and budgets.
 metadata:
   origin: ECC
 ---
-
 # Cost-Aware LLM Pipeline
 
 Patterns for controlling LLM API costs while maintaining quality. Combines model routing, budget tracking, retry logic, and prompt caching into a composable pipeline.

@@ -1,8 +1,8 @@
 ---
 name: codebase-maintenance
+category: agent-harness
 description: Gunakan saat pengguna meminta fitur, perbaikan bug, refactor kecil, atau perubahan pada repository kode yang sudah ada.
 ---
-
 # Codebase Maintenance
 
 ## Prinsip

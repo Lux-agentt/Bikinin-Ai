@@ -1,10 +1,10 @@
 ---
 name: issue-review
+category: agent-harness
 description: Review a GitHub issue the way /code-review reviews a PR. Fetches the issue with the gh CLI, checks the report against the current codebase, searches for duplicates and prior fixes, scores completeness, assigns severity, and writes a triage report plus a draft reply. Posting comments or labels is opt-in only. Use when the user asks to check, triage, validate, or review a GitHub issue.
 metadata:
   origin: ECC
 ---
-
 # Issue Review
 
 Structured triage of a single GitHub issue: is it valid, is it a duplicate, is it already fixed, what is missing, how severe is it, and what should the maintainer reply. The counterpart of the PR mode in `/code-review`.

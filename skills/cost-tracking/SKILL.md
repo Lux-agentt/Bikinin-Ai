@@ -1,10 +1,10 @@
 ---
 name: cost-tracking
+category: agent-harness
 description: Track and report Claude Code token usage, spending, and budgets from the local ECC cost-tracker metrics log. Use when the user asks about costs, spending, usage, tokens, budgets, or cost breakdowns by model, session, or date.
 metadata:
   origin: community
 ---
-
 # Cost Tracking
 
 Use this skill to analyze Claude Code cost and usage history from the metrics log

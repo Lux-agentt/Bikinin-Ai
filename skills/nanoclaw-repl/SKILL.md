@@ -1,10 +1,10 @@
 ---
 name: nanoclaw-repl
+category: agent-harness
 description: Operate and extend NanoClaw, ECC's zero-dependency session-aware REPL, with persistent markdown-backed sessions and slash commands for model switching, skill loading, session branching, cross-session search, history compaction, and export. Use when running or extending scripts/claw.js, or when resuming, branching, compacting, searching, or exporting a NanoClaw session.
 metadata:
   origin: ECC
 ---
-
 # NanoClaw REPL
 
 Use this skill when running or extending `scripts/claw.js`.

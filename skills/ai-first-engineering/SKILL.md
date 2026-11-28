@@ -1,10 +1,10 @@
 ---
 name: ai-first-engineering
+category: agent-harness
 description: Engineering operating model for teams where AI agents generate a large share of implementation output. Use when setting team process, review gates, or ownership rules for a codebase largely written by agents.
 metadata:
   origin: ECC
 ---
-
 # AI-First Engineering
 
 Use this skill when designing process, reviews, and architecture for teams shipping with AI-assisted code generation.

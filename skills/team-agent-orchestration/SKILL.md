@@ -1,10 +1,10 @@
 ---
 name: team-agent-orchestration
+category: agent-harness
 description: "Run team-based orchestration for agent squads: work items with owners and scope, agent Kanban state, branch isolation, control pane visibility, and merge gates. Use when coordinating multiple agents in parallel across branches or worktrees — multi-agent fan-out, agent Kanban, squad coordination, or merging agent output into one product."
 metadata:
   origin: ECC
 ---
-
 # Team Agent Orchestration
 
 Use this skill when agents are being managed like a team rather than a single assistant. The purpose is to make team-based orchestration reliable: clear work items, explicit ownership, agent Kanban state, branch isolation, control pane visibility, and merge gates.

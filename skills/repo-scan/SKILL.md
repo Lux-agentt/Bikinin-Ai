@@ -1,10 +1,10 @@
 ---
 name: repo-scan
+category: agent-harness
 description: Bootstrap pointer that installs the external repo-scan skill from a pinned, reviewable commit. Use when repo-scan must be installed before running its cross-stack source-code asset audit; this ECC pointer does not perform the audit itself.
 metadata:
   origin: community
 ---
-
 # repo-scan
 
 > Every ecosystem has its own dependency manager, but no tool looks across C++, Android, iOS, and Web to tell you: how much code is actually yours, what's third-party, and what's dead weight.

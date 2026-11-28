@@ -1,8 +1,8 @@
 ---
 name: nasiko-control-plane
+category: agent-harness
 description: Manage the experimental Nasiko CLI lifecycle through ECC — read-only status checks, consent-gated install of the pinned qualified version with dry-run preview, and ownership-checked uninstall, under explicit telemetry and secrets boundaries. Use when the user asks to install, inspect, or remove the Nasiko CLI or check whether it is present.
 ---
-
 # Nasiko CLI Lifecycle Bridge
 
 Use this skill when a user explicitly asks ECC to install, inspect, or remove

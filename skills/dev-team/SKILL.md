@@ -1,11 +1,11 @@
 ---
 name: dev-team
+category: agent-harness
 description: Simulate a collaborative dev team session where multiple role-based personas (PM, Architect, Developer, QA) respond to the same problem together in one session. Use when designing a feature, reviewing a proposal, or onboarding a new initiative and you want multi-role perspective without switching agents manually.
 metadata:
   origin: community
   inspired-by: bmad-method (party mode)
 ---
-
 # Dev Team
 
 Run a multi-persona session where PM, Architect, Developer, and QA each respond from their own perspective in a single turn.

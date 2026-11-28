@@ -1,10 +1,10 @@
 ---
 name: architecture-decision-records
+category: agent-harness
 description: Capture architectural decisions as numbered ADR markdown files in docs/adr/ with context, alternatives considered, consequences, and an index README. Use when the user says 'record this decision' or 'ADR this', chooses between frameworks or databases, discusses trade-offs, or asks why the codebase is shaped this way.
 metadata:
   origin: ECC
 ---
-
 # Architecture Decision Records
 
 Capture architectural decisions as they happen during coding sessions. Instead of decisions living only in Slack threads, PR comments, or someone's memory, this skill produces structured ADR documents that live alongside the code.

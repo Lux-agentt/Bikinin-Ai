@@ -1,9 +1,9 @@
 ---
 name: skill-host-compat
+category: agent-harness
 description: Lint ECC skills for Codex/Cursor-safe frontmatter and Claude-only substitutions before a skill PR.
 origin: ECC
 ---
-
 # Skill Host Compatibility
 
 Run the same host-compat gate CI uses on `skills/` before opening a skill PR.

@@ -1,11 +1,11 @@
 ---
 name: inherit-legacy-style
+category: agent-harness
 description: Prevent AI style drift on legacy projects by scanning the codebase for implicit conventions, resolving conflicts with the operator one at a time, and writing an enforceable .ai-style-rules.md (Golden Files, naming rules, DONTs) plus an optional CLAUDE.md hook. Use when onboarding an AI agent onto a hand-written legacy codebase or extracting a project's unwritten coding rules.
 metadata:
   origin: community
 allowed-tools: Read, Glob, Grep, Bash, Edit, Write, AskUserQuestion
 ---
-
 # Inherit Legacy Style
 
 Prevents AI code style drift in legacy projects by scanning the codebase for implicit conventions across 4 meta-architecture dimensions, resolving conflicts with the user one at a time, and crystallizing the consensus into an enforceable `.ai-style-rules.md`. Fully language- and framework-agnostic.

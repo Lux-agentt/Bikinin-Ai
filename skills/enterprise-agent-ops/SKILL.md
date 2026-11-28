@@ -1,10 +1,10 @@
 ---
 name: enterprise-agent-ops
+category: agent-harness
 description: Operational controls for long-lived or cloud-hosted agent systems — runtime lifecycle (start, pause, stop, restart), observability (logs, metrics, traces), least-privilege safety scopes and kill switches, and rollout/rollback change management with audit logs and success/cost metrics. Use when running production agent fleets on PM2, systemd, or containers that need monitoring, incident response, or deployment gates.
 metadata:
   origin: ECC
 ---
-
 # Enterprise Agent Ops
 
 Use this skill for cloud-hosted or continuously running agent systems that need operational controls beyond single CLI sessions.

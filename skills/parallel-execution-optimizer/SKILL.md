@@ -1,12 +1,12 @@
 ---
 name: parallel-execution-optimizer
+category: agent-harness
 description: Speed up a task by turning it into a dependency graph of parallel lanes with a lane matrix, batched reads and checks, write surfaces isolated by file, worktree, branch, or service, and a final verification table. Use when the user wants a task done much faster through parallel work, concurrent agents, batched tool calls, isolated worktrees, many independent verification lanes, or bounded homogeneous work that reuses shared preparation while record operations remain sequential, without losing correctness.
 license: MIT
 metadata:
   origin: ECC
 tools: Read, Write, Edit, Bash, Grep, Glob
 ---
-
 # Parallel Execution Optimizer
 
 Use this skill when speed comes from doing independent work at the same time:

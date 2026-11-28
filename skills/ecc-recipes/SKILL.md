@@ -1,5 +1,6 @@
 ---
 name: ecc-recipes
+category: agent-harness
 description: Map a described workflow to the right ECC command group with run-order and stop condition, or browse all command-group recipe families read live from the commands directory. Advisory only — never executes. Use when asked which commands run a workflow, the command sequence for a task, or to list ECC pipelines; not for executing the task (route to the command itself), single-command docs (use ecc-guide), or prompt rewrites (use prompt-optimizer).
 argument-hint: <workflow description | empty=list all>
 origin: community
@@ -7,7 +8,6 @@ author: KyawZinLatt
 metadata:
   version: "1.0.0"
 ---
-
 # ECC Recipes
 
 One entry point for "which group of ECC slash-commands runs my workflow, in what

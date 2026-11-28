@@ -1,10 +1,10 @@
 ---
 name: config-health
+category: agent-harness
 description: Runtime configuration integrity monitoring for Claude Code. Detects config drift, rule staleness, and hook wiring gaps at startup, with an optional per-tool mode. Complements delivery-gate with startup soft monitoring.
 metadata:
   origin: ECC
 ---
-
 # Config Health
 
 A real-time monitoring layer. delivery-gate blocks at session end; config-health catches problems during the session — when cheap to fix.

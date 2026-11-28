@@ -1,10 +1,10 @@
 ---
 name: iterative-retrieval
+category: agent-harness
 description: Pattern for progressively refining context retrieval to solve the subagent context problem. Use when a subagent lacks the context it needs and retrieval must be refined across passes.
 metadata:
   origin: ECC
 ---
-
 # Iterative Retrieval Pattern
 
 Solves the "context problem" in multi-agent workflows where subagents don't know what context they need until they start working.

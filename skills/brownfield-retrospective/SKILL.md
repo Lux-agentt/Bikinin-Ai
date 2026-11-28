@@ -1,10 +1,10 @@
 ---
 name: brownfield-retrospective
+category: agent-harness
 description: Run the ECC engineering process retroactively against an existing project slice. Audit current state, reconstruct past decisions, produce a four-axis gap register (thinking, coding practice, missing features, technology selection), then execute fixes forward through the plan-TDD-review pipeline. Use when adopting ECC mid-project, taking over an inherited codebase, or asking what was missed and what would have been built differently from day one.
 metadata:
   origin: ECC
 ---
-
 # Brownfield Retrospective
 
 Run ECC's engineering process retroactively against a project that was built without it. Pick any slice of an existing codebase, audit what exists, reconstruct how it got there, extract a four-axis gap register, then execute the fixes forward through the standard ECC pipeline.

@@ -1,10 +1,10 @@
 ---
 name: codebase-onboarding
+category: agent-harness
 description: Analyze an unfamiliar codebase and generate a structured onboarding guide with architecture map, key entry points, conventions, and a starter CLAUDE.md. Use when joining a new project or setting up Claude Code for the first time in a repo.
 metadata:
   origin: ECC
 ---
-
 # Codebase Onboarding
 
 Systematically analyze an unfamiliar codebase and produce a structured onboarding guide. Designed for developers joining a new project or setting up Claude Code in an existing repo for the first time.
