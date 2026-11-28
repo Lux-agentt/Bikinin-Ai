@@ -374,19 +374,6 @@
           </div>
         </main>
 
-        <!-- Kuota harian :free (Fase 8) — diisi app.js dari ledger terbaru; tersembunyi bila belum ada pemakaian :free hari ini -->
-        <div
-          id="quotaLine"
-          hidden
-          style="
-            padding: 2px 16px 8px;
-            font-size: 12px;
-            line-height: 1.5;
-            color: #8a8f98;
-            text-align: center;
-          "
-        ></div>
-
         <!-- Composer -->
         <form class="composer" id="form" autocomplete="off">
           <div class="cbox" id="cbox">
@@ -536,17 +523,13 @@
             </div>
           </div>
         </form>
-        <div class="foot-note">
-          Ketik revisi kapan saja setelah hasil jadi (mis. "mode terang",
-          "tambah harga", atau "tambah whatsapp").
-        </div>
       </div>
     </div>
 
     <template id="tplThink">
       <div class="think-block">
         <button type="button" class="think-toggle" aria-expanded="true">
-          <span class="think-dot" aria-hidden="true"></span>
+          <img class="think-logo" src="/logo.png" alt="" aria-hidden="true" />
           <span class="think-label shimmer"></span>
           <span class="think-timer-pill">0.0s</span>
           <svg

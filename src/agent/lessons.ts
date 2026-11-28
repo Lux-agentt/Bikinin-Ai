@@ -161,12 +161,31 @@ function cleanLesson(l: FreshLesson): FreshLesson | null {
   return cleaned;
 }
 
+/** Kata/frasa yang menandai pesan pengguna sebagai koreksi atas hasil sebelumnya. */
+const CORRECTION_RE =
+  /\b(salah|bukan|jelek|harusnya|seharusnya|ganti|jangan|maksud|kok|kenapa|benerin|perbaiki|tidak sesuai|nggak sesuai|ga sesuai|salah paham|kurang bagus|kurang cocok|kurang rapi|masih gabisa|masih kosong|masih jelek|masih salah|tetap jelek|tetap salah|belum bisa|belum benar)\b/i;
+
+/** Pesan pengguna pertama di run ini bila isinya koreksi — null bila bukan. */
+function firstCorrectionMessage(transcript: Msg[]): string | null {
+  for (const m of transcript) {
+    if (m.role === "user" && typeof m.content === "string") {
+      const text = m.content.replace(/\s+/g, " ").trim();
+      if (text.length >= 8 && CORRECTION_RE.test(text)) {
+        return text.slice(0, LESSON_TASK_MAX);
+      }
+      return null;
+    }
+  }
+  return null;
+}
+
 /**
  * Deterministic extraction from one finished run. Reads the transcript for
- * failure signals only (assistant tool calls + tool results), plus the final
- * status and summary. Returns [] when the run taught nothing durable — a
- * clean run, or a single failure the agent fixed on the first retry, leaves
- * no lesson. The caller then writes nothing.
+ * failure signals (assistant tool calls + tool results) and for user
+ * corrections of the previous result, plus the final status and summary.
+ * Returns [] when the run taught nothing durable — a clean run, or a single
+ * failure the agent fixed on the first retry, leaves no lesson. The caller
+ * then writes nothing.
  */
 export function extractLessons(
   transcript: Msg[],
@@ -266,6 +285,26 @@ export function extractLessons(
           "Saat run berakhir error, baca pesan errornya sampai paham penyebabnya sebelum mengulang — jangan ulangi perintah yang sama.",
       }),
     );
+  }
+
+  // Koreksi pengguna: pesan yang memperbaiki hasil sebelumnya ("tampilan
+  // dichatnya kurang bagus", "maksud simple saya tu..."). Aturan lama cuma
+  // membaca kegagalan tool — koreksi seperti ini tidak pernah jadi
+  // pelajaran, jadi agent mengulang kesalahan yang sama di chat/tugas lain.
+  // Satu pelajaran per run, hanya bila run selesai (koreksinya sudah
+  // dikerjakan). cleanLesson tetap menyaring rahasia (API key dsb).
+  if (status === "completed") {
+    const correction = firstCorrectionMessage(transcript);
+    if (correction) {
+      push(
+        cleanLesson({
+          task: correction,
+          gagal: `Hasil sebelumnya tidak sesuai harapan pengguna: ${correction}`,
+          berhasil: "Agent mengerjakan ulang sesuai koreksi dan run selesai.",
+          aturan: `Perhatikan koreksi pengguna: "${correction}" — jangan ulangi kesalahan yang sama.`,
+        }),
+      );
+    }
   }
 
   return out;

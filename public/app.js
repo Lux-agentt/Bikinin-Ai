@@ -21,6 +21,7 @@ const state = {
   curModel: null,
   curEffort: "sedang",
   runId: null,
+  runSessionId: null, // sesi pemilik run yang sedang aktif (bisa beda dari sessionId saat pengguna pindah chat selagi run jalan)
   sessionId: null,
   source: null,
   busy: false,
@@ -1085,13 +1086,17 @@ document.addEventListener("click", (e) => {
 
 $("#enhanceBtn").addEventListener("click", () => {
   const raw = input.value.trim();
+  // Jangan sisipkan template apa pun: template landing page yang lama
+  // tidak cocok dengan isi chat (mis. pertanyaan soal cloning suara).
+  // Tombol ini hanya memperjelas perintah yang sudah ditulis pengguna.
   if (!raw) {
-    input.value =
-      "Buatkan landing page modern lengkap dengan hero section, fitur unggulan, dan tombol CTA responsif";
-  } else if (raw.length < 70) {
+    toast("Tulis perintah dulu, baru ketuk ini untuk memperjelas.");
+    return;
+  }
+  if (raw.length < 70) {
     input.value =
       raw +
-      " — buat tampilannya modern, responsif di HP dan desktop, lengkap dengan section fitur dan tombol aksi yang jelas.";
+      " — kerjakan dengan teliti sampai selesai, dan jelaskan singkat hasilnya.";
   } else {
     toast("Prompt sudah cukup detail");
     return;
@@ -1216,13 +1221,18 @@ function addThink(label) {
     block,
     labelEl,
     timer,
+    drawer: block.querySelector(".think-drawer"),
     linesEl: block.querySelector(".think-lines"),
     codeLive: block.querySelector(".code-live"),
     codeLivePath: block.querySelector(".code-live-path"),
     codeLiveBody: block.querySelector(".code-live-body"),
     rows: new Map(),
+    files: new Set(), // path file yang disentuh run ini (untuk hitungan header)
     count: 0,
   };
+  // Drawer mulai kosong (belum ada langkah/kode) — jangan tampil sebagai
+  // kotak kosong; begitu ada isi, kelasnya dilepas di thinkLine/showCode.
+  state.think.drawer.classList.add("empty");
 }
 
 /** Tampilkan kode asli terbaru di panel think (diff file / output tool).
@@ -1230,6 +1240,7 @@ function addThink(label) {
 function showCode(title, body) {
   const t = state.think;
   if (!t || !t.codeLive || !body) return;
+  if (t.drawer) t.drawer.classList.remove("empty");
   t.codeLivePath.textContent = title;
   // Panel hanya cuplikan pendek (bukan dinding teks): cukup untuk melihat
   // apa yang sedang dikerjakan, tanpa memenuhi layar.
@@ -1317,8 +1328,28 @@ function thinkLine(callId, text) {
   t.linesEl.appendChild(line);
   t.rows.set(callId, { line, label, text: short, snippet });
   t.count += 1;
-  t.labelEl.textContent = short;
+  // Hitung file yang disentuh (kayak Z.ai "Explored N files"): label
+  // langkah file selalu "read_file/write_file/edit_file <path>".
+  const [tool, ...rest] = short.split(" ");
+  if (
+    (tool === "read_file" || tool === "write_file" || tool === "edit_file") &&
+    rest.length > 0
+  ) {
+    t.files.add(rest.join(" "));
+  }
+  if (t.drawer) t.drawer.classList.remove("empty");
+  updateThinkHeader();
   scrollDown();
+}
+
+/** Header blok proses kayak Z.ai ("Explored N files, Ran N commands"):
+ * begitu ada langkah, label jadi hitungan file + perintah, bukan lagi
+ * langkah terakhir. Sebelum langkah pertama, label tetap
+ * "Menyusun rencana…". */
+function updateThinkHeader() {
+  const t = state.think;
+  if (!t || t.count === 0) return;
+  t.labelEl.textContent = `${t.files.size} file · ${t.count} perintah`;
 }
 
 function finishThink(status, steps) {
@@ -1902,6 +1933,30 @@ $("#denyBtn").addEventListener("click", () => void answer("deny"));
 // ---------- Events ----------
 
 function handle(e) {
+  // Kejadian dari run yang jalan di chat lain (pengguna pindah selagi run
+  // aktif): jangan tempelkan ke tampilan chat yang sedang dibuka.
+  // Satu-satunya yang diurus: run_finished membebaskan UI, dan
+  // approval_requested memberi tahu lewat toast supaya pengguna bisa
+  // kembali ke chat itu untuk menjawab.
+  if (
+    e.run_id &&
+    state.runId &&
+    e.run_id === state.runId &&
+    state.runSessionId !== state.sessionId
+  ) {
+    if (e.type === "run_finished") {
+      if (state.source) state.source.close();
+      state.source = null;
+      state.runId = null;
+      state.runSessionId = null;
+      setBusy(false);
+      syncFolderPreviews();
+      toast("Agent selesai bekerja di chat lain.");
+    } else if (e.type === "approval_requested") {
+      toast("Agent minta persetujuan di chat lain — buka chat itu untuk menjawab.");
+    }
+    return;
+  }
   switch (e.type) {
     case "run_started":
       if (!state.think) addThink("Menyusun rencana…");
@@ -1965,6 +2020,10 @@ function handle(e) {
 
     case "file_changed":
       state.files.set(e.path, { bytes: e.bytes, diff: e.diff });
+      if (state.think) {
+        state.think.files.add(e.path);
+        updateThinkHeader();
+      }
       if (e.diff) {
         showCode(`Diff: ${e.path}`, e.diff);
         // Cuplikan diff di bawah langkah write/edit file yang bersangkutan.
@@ -2217,6 +2276,7 @@ async function start(message) {
     const data = await r.json();
     state.runId = data.run_id;
     state.sessionId = data.session_id;
+    state.runSessionId = data.session_id;
     listen(data.run_id);
   } catch (err) {
     finishThink("error", 0);
@@ -2288,6 +2348,7 @@ async function resumeRun() {
     const data = await r.json();
     state.runId = data.run_id;
     state.sessionId = data.session_id;
+    state.runSessionId = data.session_id;
     listen(data.run_id);
   } catch (err) {
     finishThink("error", 0);
@@ -2300,16 +2361,17 @@ async function resumeRun() {
 }
 
 function resetSession() {
-  if (state.busy) {
-    toast("Hentikan agent dulu");
-    return;
-  }
+  // Boleh kembali ke layar awal selagi run jalan — run lanjut di latar
+  // (server cuma jalanin satu run; kirim baru tetap nunggu run selesai).
   closeOverlay();
   closeFolderSheet();
   clearInterval(state.timerInt);
   state.think = null;
   main.replaceChildren(heroEl);
-  state.runId = null;
+  if (!state.busy) {
+    state.runId = null;
+    state.runSessionId = null;
+  }
   state.sessionId = null;
   state.files.clear();
   state.versions = [];
@@ -2325,14 +2387,17 @@ function resetSession() {
   updateRevBar();
   paintFolders();
   syncFolderPreviews();
-  toast("Sesi direset ke layar awal");
+  toast(
+    state.busy
+      ? "Sesi direset — agent lanjut bekerja di latar"
+      : "Sesi direset ke layar awal",
+  );
 }
 
 async function restoreSession(sessionId) {
-  if (state.busy) {
-    toast("Hentikan agent dulu");
-    return;
-  }
+  // Boleh pindah chat selagi run jalan — run lanjut di latar, SSE tetap
+  // terpasang supaya run_finished-nya tetap sampai (handle() yang
+  // memilah kejadian latar vs kejadian chat yang sedang dibuka).
   let detail;
   try {
     detail = await fetchJson(`/api/sessions/${encodeURIComponent(sessionId)}`);
@@ -2343,7 +2408,13 @@ async function restoreSession(sessionId) {
   closeFolderSheet();
   closeOverlay();
   state.sessionId = detail.session_id;
-  state.runId = null;
+  if (!state.busy) {
+    state.runId = null;
+    state.runSessionId = null;
+  }
+  // Blok think tampilan lama ikut terlepas dari DOM — lepas referensinya
+  // supaya replay membangun blok baru untuk chat ini.
+  state.think = null;
   state.versions = [];
   state.activeVersion = -1;
   state.resultCard = null;
@@ -2370,7 +2441,11 @@ async function restoreSession(sessionId) {
     // Run yang mati tanpa run_finished (mis. server restart) menyisakan
     // blok think + timer yang jalan terus — tutup paksa supaya tidak
     // nyangkut dan run berikutnya dapat blok think baru yang bersih.
-    if (state.think) finishThink("stopped", state.think.count);
+    // KECUALI run yang dipulihkan ini masih jalan (pengguna kembali ke
+    // chat yang run-nya aktif): blok think-nya harus tetap hidup supaya
+    // kejadian live tetap tertempel.
+    const liveRun = detail.runs.some((r) => r.run_id === state.runId);
+    if (state.think && !liveRun) finishThink("stopped", state.think.count);
   }
   // One version per run; content is the current workspace file (older runs were
   // overwritten, so no snapshot is faked for them).
@@ -2394,7 +2469,11 @@ async function restoreSession(sessionId) {
   if (state.versions.length) renderResultCard();
   updateRevBar();
   syncFolderPreviews();
-  toast("Proyek dibuka dari riwayat");
+  toast(
+    state.busy
+      ? "Proyek dibuka — agent lanjut bekerja di latar"
+      : "Proyek dibuka dari riwayat",
+  );
 }
 
 // ---------- Input ----------
@@ -2452,58 +2531,6 @@ document.addEventListener("keydown", (ev) => {
     if (!$("#overlay").hidden) closeOverlay();
   }
 });
-
-// ---------- Kuota harian :free (Fase 8) ----------
-// Reads the same ledger endpoint as ledger.js and shows today's shared
-// :free pool usage from the latest run's quota snapshot. Hidden when the
-// latest run recorded no :free usage (or no run exists yet). A failed poll
-// never breaks the UI — the last shown text simply stays.
-async function refreshQuotaLine() {
-  const el = $("#quotaLine");
-  if (!el) return;
-  try {
-    const sRes = await fetch("/api/sessions");
-    if (!sRes.ok) return;
-    const sessions = await sRes.json();
-    if (!Array.isArray(sessions) || sessions.length === 0) {
-      el.hidden = true;
-      return;
-    }
-    const lRes = await fetch(
-      "/api/sessions/" + sessions[0].session_id + "/ledger",
-    );
-    if (!lRes.ok) return;
-    const ledgers = await lRes.json();
-    const latest =
-      Array.isArray(ledgers) && ledgers.length > 0
-        ? ledgers[ledgers.length - 1]
-        : null;
-    const q = latest && latest.quota;
-    if (!q) {
-      el.hidden = true;
-      return;
-    }
-    el.hidden = false;
-    el.textContent =
-      "Kuota :free hari ini (UTC " +
-      q.date +
-      "): " +
-      q.free_used +
-      "/" +
-      q.free_limit +
-      " request · run ini: " +
-      latest.llm_calls +
-      " pgl LLM" +
-      (q.free_used >= q.free_limit
-        ? " — kuota habis, run berikutnya pindah provider atau berhenti"
-        : "");
-  } catch (e) {
-    /* keep the last shown text */
-  }
-}
-refreshQuotaLine();
-setInterval(refreshQuotaLine, 15000);
-document.addEventListener("submit", () => setTimeout(refreshQuotaLine, 1500));
 
 // ---------- Boot ----------
 

@@ -305,11 +305,9 @@ header {
   place-items: center;
   overflow: hidden;
   color: #fff;
-  background: linear-gradient(150deg, #6b9aff 0%, #315ff2 100%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.38),
-    inset 0 -6px 12px rgba(21, 46, 140, 0.35),
-    0 0 18px rgba(93, 139, 255, 0.35);
+  /* Logo PNG sudah transparan di luar huruf X — jangan beri kotak biru,
+     biarkan logonya saja yang tampil di atas latar aplikasi. */
+  background: transparent;
 }
 .logo-tile svg {
   width: 16px;
@@ -497,23 +495,9 @@ main::-webkit-scrollbar {
   border-radius: 16px;
   margin: 0 auto 14px;
   overflow: hidden;
-  background: linear-gradient(165deg, #7ea2ff 0%, #4a78ff 45%, #315ff2 100%);
-  box-shadow:
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.45),
-    inset 0 -10px 20px rgba(21, 46, 140, 0.4),
-    0 0 48px rgba(49, 88, 238, 0.48);
+  /* Logo PNG sudah transparan — tanpa kotak biru, tanpa kilau. */
+  background: transparent;
   animation: fadeUp 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) both;
-}
-.hero .logo-tile::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    115deg,
-    rgba(255, 255, 255, 0.3) 0%,
-    rgba(255, 255, 255, 0) 36%
-  );
-  pointer-events: none;
 }
 .hero .logo-tile svg {
   width: 28px;
@@ -967,24 +951,15 @@ main::-webkit-scrollbar {
 .think-toggle:hover {
   color: var(--text);
 }
-.think-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
+/* Ikon header blok proses: logo X kuxagent (bukan petir, bukan titik) —
+   PNG-nya transparan, jadi tampil apa adanya di atas latar aplikasi. */
+.think-logo {
+  width: 15px;
+  height: 15px;
   flex: none;
-  background: var(--blue);
-  box-shadow: 0 0 8px rgba(93, 139, 255, 0.8);
-  animation: pulseDot 1.1s ease-in-out infinite;
 }
-.think-block.done .think-dot {
-  background: var(--green);
-  box-shadow: 0 0 7px rgba(52, 211, 153, 0.55);
-  animation: none;
-}
-.think-block.err .think-dot {
-  background: var(--red);
-  box-shadow: 0 0 7px rgba(251, 113, 133, 0.55);
-  animation: none;
+.think-block:not(.done):not(.err) .think-logo {
+  animation: pulseDot 1.6s ease-in-out infinite;
 }
 .think-label {
   white-space: nowrap;
@@ -1033,6 +1008,11 @@ main::-webkit-scrollbar {
   margin-top: 7px;
   animation: fadeIn 0.22s ease both;
 }
+/* Drawer kosong (belum ada langkah/kode — mis. fase "Menyusun
+   rencana…") jangan tampil sebagai kotak kosong. */
+.think-drawer.empty {
+  display: none;
+}
 .think-block.collapsed .think-drawer {
   display: none;
 }
@@ -1053,6 +1033,10 @@ main::-webkit-scrollbar {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Pohon langkah kayak Z.ai: garis vertikal + titik di tiap langkah. */
+  border-left: 1px solid rgba(151, 175, 228, 0.16);
+  margin-left: 4px;
+  padding-left: 14px;
 }
 
 /* ===== Panel kode live (isi kode asli saat run, bukan placeholder) ===== */
@@ -1179,10 +1163,24 @@ main::-webkit-scrollbar {
   cursor: not-allowed;
 }
 .think-line {
+  position: relative;
   font-size: 12.5px;
   line-height: 1.55;
   color: #9aa4b8;
   animation: fadeUp 0.26s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.think-line::after {
+  content: "";
+  position: absolute;
+  left: -17px;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.think-line:not(.ok):not(.fail)::after {
+  background: var(--blue-2);
 }
 
 /* Cuplikan kode di bawah label langkah: tampil tapi simpel — kecil,
@@ -1894,14 +1892,6 @@ main::-webkit-scrollbar {
   background: rgba(93, 139, 255, 0.16);
   color: #cfdcff;
   box-shadow: inset 0 0 0 1px rgba(93, 139, 255, 0.35);
-}
-
-.foot-note {
-  color: var(--faint);
-  font-size: 10px;
-  text-align: center;
-  padding: 8px 16px calc(9px + env(safe-area-inset-bottom));
-  line-height: 1.5;
 }
 
 /* ===== FOLDER EXPLORER SHEET / MODAL (RIWAYAT & SKILL) ===== */

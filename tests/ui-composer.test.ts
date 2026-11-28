@@ -139,8 +139,10 @@ describe("tampilan proses kayak Z.ai (lipat saat selesai)", () => {
     expect(js).toMatch(
       /function addThink\(label\) \{[\s\S]*?block\.classList\.add\("collapsed"\)/,
     );
-    // Header tetap hidup saat terlipat: label = langkah terakhir.
-    expect(js).toMatch(/t\.labelEl\.textContent = short;/);
+    // Header tetap hidup saat terlipat: label = hitungan file + perintah
+    // (bukan lagi langkah terakhir — lihat updateThinkHeader).
+    expect(js).toContain("function updateThinkHeader()");
+    expect(js).not.toMatch(/t\.labelEl\.textContent = short;/);
   });
 
   it("header think bisa diketuk untuk buka-tutup (drawer tersembunyi saat lipat)", () => {
@@ -268,7 +270,14 @@ describe("pindah chat bolak-balik (riwayat / Tab Baru)", () => {
       /async function restoreSession\(sessionId\) \{[\s\S]*?try \{[\s\S]*?for \(const ev of run\.events\) \{[\s\S]*?handle\(ev\)/,
     );
     expect(js).toMatch(
-      /async function restoreSession\(sessionId\) \{[\s\S]*?finally \{[\s\S]*?state\.replaying = false[\s\S]*?if \(state\.think\) finishThink\("stopped", state\.think\.count\)/,
+      /async function restoreSession\(sessionId\) \{[\s\S]*?finally \{[\s\S]*?state\.replaying = false/,
+    );
+    // Run yang masih jalan tidak ikut ditutup paksa saat restore.
+    expect(js).toContain(
+      "const liveRun = detail.runs.some((r) => r.run_id === state.runId)",
+    );
+    expect(js).toContain(
+      'if (state.think && !liveRun) finishThink("stopped", state.think.count);',
     );
   });
 
@@ -309,5 +318,83 @@ describe("kartu preview: konten tidak terpotong, badge tidak menumpuk", () => {
     expect(css).not.toMatch(/\.thumb-badge\s*\{[^}]*position:\s*absolute/);
     expect(css).not.toMatch(/\.thumb-badge\s*\{[^}]*backdrop-filter/);
     expect(js).toContain('card.querySelector(".thumb-badge")');
+  });
+});
+
+describe("logo tanpa kotak biru (hanya logo X)", () => {
+  it("tile logo rail + hero transparan, tanpa gradasi biru dan tanpa kilau", () => {
+    expect(css).toMatch(/\.logo-tile \{[^}]*background: transparent/);
+    expect(css).not.toMatch(/background: linear-gradient\(150deg, #6b9aff/);
+    expect(css).not.toMatch(/background: linear-gradient\(165deg, #7ea2ff/);
+    expect(css).not.toContain(".hero .logo-tile::after");
+  });
+
+  it("ikon header blok proses pakai logo X, bukan titik biru", () => {
+    expect(html).toContain('class="think-logo"');
+    expect(html).not.toContain("think-dot");
+    expect(css).toContain(".think-logo {");
+  });
+});
+
+describe("baris kuota + petunjuk bawah input dihapus", () => {
+  it("HTML tidak lagi memuat quotaLine dan teks petunjuk revisi", () => {
+    expect(html).not.toContain("quotaLine");
+    expect(html).not.toContain("Ketik revisi kapan saja");
+  });
+
+  it("JS tidak lagi memuat refreshQuotaLine, CSS tidak lagi memuat foot-note", () => {
+    expect(js).not.toContain("refreshQuotaLine");
+    expect(css).not.toContain(".foot-note");
+  });
+});
+
+describe("drawer kosong disembunyikan + header proses kayak Z.ai", () => {
+  it("drawer kosong display none, dilepas begitu ada isi", () => {
+    expect(css).toMatch(/\.think-drawer\.empty \{[^}]*display: none/);
+    expect(js).toContain('state.think.drawer.classList.add("empty")');
+    expect(js).toContain('t.drawer.classList.remove("empty")');
+  });
+
+  it("header menampilkan hitungan file + perintah, bukan langkah terakhir", () => {
+    expect(js).toContain("function updateThinkHeader()");
+    expect(js).toContain("} file · ${t.count} perintah");
+    expect(js).toContain("files: new Set()");
+    expect(js).toContain('t.files.add(rest.join(" "))');
+  });
+
+  it("daftar langkah tampil sebagai pohon (garis + titik)", () => {
+    expect(css).toMatch(/\.think-lines \{[^}]*border-left:/);
+    expect(css).toMatch(/\.think-line::after \{[^}]*border-radius: 50%/);
+  });
+});
+
+describe("tombol perjelas tanpa template", () => {
+  it("tidak ada lagi template landing page yang tidak cocok dengan isi chat", () => {
+    expect(js).not.toContain(
+      "Buatkan landing page modern lengkap dengan hero section",
+    );
+    expect(js).not.toContain(
+      "buat tampilannya modern, responsif di HP dan desktop",
+    );
+  });
+
+  it("input kosong ditegur, input pendek ditambah akhiran umum", () => {
+    expect(js).toContain("Tulis perintah dulu, baru ketuk ini untuk memperjelas.");
+    expect(js).toContain("kerjakan dengan teliti sampai selesai");
+  });
+});
+
+describe("pindah chat selagi run jalan", () => {
+  it("tidak ada lagi larangan 'Hentikan agent dulu' di reset/restore", () => {
+    expect(js).not.toContain('toast("Hentikan agent dulu")');
+  });
+
+  it("handle() memilah kejadian run latar berdasarkan run_id", () => {
+    expect(js).toContain("runSessionId: null,");
+    expect(js).toContain("state.runSessionId !== state.sessionId");
+    expect(js).toContain("Agent selesai bekerja di chat lain.");
+    expect(js).toContain(
+      "detail.runs.some((r) => r.run_id === state.runId)",
+    );
   });
 });

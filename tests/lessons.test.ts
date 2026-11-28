@@ -102,6 +102,45 @@ describe("extractLessons (rule-based, no model call)", () => {
     ).toEqual([]);
   });
 
+  it("records a lesson when the user corrects the previous result", () => {
+    const lessons = extractLessons(
+      [
+        user("tampilan dichatnya kurang bagus, harusnya simpel aja"),
+        asstTool("c1", "edit_file", '{"path":"public/app.css"}'),
+        toolMsg("c1", "OK: app.css diubah"),
+      ],
+      "Tampilan diperbaiki.",
+      "completed",
+    );
+    expect(lessons).toHaveLength(1);
+    expect(lessons[0].task).toContain("tampilan dichatnya kurang bagus");
+    expect(lessons[0].aturan).toContain("Perhatikan koreksi pengguna");
+  });
+
+  it("records no correction lesson for a plain request or a failed run", () => {
+    // Plain request, no correction language: clean run teaches nothing.
+    expect(
+      extractLessons(
+        [
+          user("buatkan landing page kopi estetik"),
+          asstTool("c1", "write_file", '{"path":"index.html"}'),
+          toolMsg("c1", "OK: index.html ditulis"),
+        ],
+        "Selesai.",
+        "completed",
+      ),
+    ).toEqual([]);
+    // Correction language but the run errored: the correction was not
+    // carried out, so only the error lesson is kept.
+    const errorLessons = extractLessons(
+      [user("tampilan dichatnya kurang bagus, benerin dong")],
+      "Run berakhir error.",
+      "error",
+    );
+    expect(errorLessons).toHaveLength(1);
+    expect(errorLessons[0].gagal).toContain("Run berakhir error");
+  });
+
   it("records the workaround when a different tool fixes the failure", () => {
     const lessons = extractLessons(
       [
