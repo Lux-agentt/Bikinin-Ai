@@ -152,16 +152,81 @@ const BLOCKED: Array<{ re: RegExp; reason: string }> = [
 // `python3 -m http.server` juga TIDAK: server manual menggantung tool call
 // (preview sudah disediakan UI) — tetap minta izin supaya bisa ditolak.
 // `find` hanya bentuk amannya: -delete/-exec/-execdir/-ok jatuh ke confirm.
+// Split a shell command into segments on && || ; | newline — but a pipe
+// inside quotes or escaped (\|) is part of the argument, not a separator:
+// `grep -n "a\|b" file` is ONE grep call, and `grep -E '(href|src)' file`
+// is ONE grep call. The naive .split() broke both into pieces that no
+// longer match the allowlist, so routine greps popped an approval sheet
+// and the run waited forever (live 2026-11-28: grep "tilt\|transform3d"
+// stuck run_e03e3314; the user read it as "chat 1 stops when I go to
+// chat 2"). BLOCKED rules still run on the whole command first, so this
+// can only make the allow check more accurate, never looser.
+function splitSegments(cmd: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let quote: string | null = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (quote) {
+      // Inside double quotes a backslash escapes the next char (so \"
+      // does not close the quote); inside single quotes it is literal.
+      if (quote === '"' && ch === "\\" && i + 1 < cmd.length) {
+        cur += ch + cmd[i + 1];
+        i++;
+        continue;
+      }
+      cur += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < cmd.length) {
+      cur += ch + cmd[i + 1];
+      i++;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === "&" && cmd[i + 1] === "&") {
+      out.push(cur);
+      cur = "";
+      i++;
+      continue;
+    }
+    if (ch === "|" && cmd[i + 1] === "|") {
+      out.push(cur);
+      cur = "";
+      i++;
+      continue;
+    }
+    if (ch === ";" || ch === "|" || ch === "\n") {
+      out.push(cur);
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur);
+  return out.map((s) => s.trim()).filter((s) => s !== "");
+}
+
 const ALLOWED: RegExp[] = [
   /^npm (run [\w:.-]+|test|--version|-v)$/,
   /^npx (tsc|vitest|tsx|prettier)( .*)?$/,
   /^tsc( .*)?$/,
-  /^node [\w./-]+\.(m?js|ts)$/,
+  /^node (--check )?[\w./-]+\.(m?js|ts)( .*)?$/,
   /^(ls|pwd|cat|head|tail|wc|grep|echo|mkdir)( .*)?$/,
   /^sed -n( .*)?$/,
   /^python3? [\w./-]+\.py( .*)?$/,
   /^find (?!.*-(delete|exec|execdir|ok)(\s|$)).*$/,
   /^(cp|mv|touch|diff)( .*)?$/,
+  // `cd` hanya relatif (aturan BLOCKED memagari .. dan path absolut
+  // duluan); `which` hanya membaca; `true`/`false` no-op (`|| true`).
+  /^cd( [\w./-]+)?$/,
+  /^which [\w./-]+( [\w./-]+)*$/,
+  /^(true|false)$/,
 ];
 
 export function classifyCommand(command: string): Verdict {
@@ -174,10 +239,7 @@ export function classifyCommand(command: string): Verdict {
       return { decision: "block", reason: rule.reason, command };
   }
 
-  const segments = cmd
-    .split(/&&|\|\||;|\||\n/)
-    .map((s) => s.trim())
-    .filter((s) => s !== "");
+  const segments = splitSegments(cmd);
   const allSafe = segments.every((seg) => ALLOWED.some((re) => re.test(seg)));
   if (allSafe) return { decision: "allow" };
 

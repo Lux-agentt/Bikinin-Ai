@@ -1951,13 +1951,17 @@ $("#closeOverlay").addEventListener("click", closeOverlay);
 
 // ---------- Approval ----------
 
-function openApproval(e) {
+function openApproval(e, runId) {
   // Jangan buka lembar izin saat memutar ulang riwayat: persetujuan lama
   // sudah tidak hidup (tidak ada run yang menunggu), dan menjawabnya
   // diam-diam gagal karena tidak ada run yang menunggu.
   if (state.replaying) return;
   state.approvalId = e.approval_id;
-  state.approvalRunId = e.run_id ?? ownRunId();
+  // runId eksplisit menang: kejadian yang diputar ulang dari riwayat tidak
+  // membawa run_id, dan ownRunId() masih null saat reattach belum selesai
+  // (probeRunAlive masih menunggu) — tanpa ini lembarnya kebuka tapi
+  // jawabannya selalu ditolak "sudah tidak aktif" dan run diam selamanya.
+  state.approvalRunId = runId ?? e.run_id ?? ownRunId();
   $("#approveReason").textContent = `${e.reason} (risiko ${e.risk})`;
   $("#approveCmd").textContent = e.command || "";
   $("#approveSheet").hidden = false;
@@ -2503,7 +2507,25 @@ async function stopRun() {
       drainQueue();
       return;
     }
-    toast("Menghentikan agent…");
+    // Minta berhenti berhasil: update UI langsung sebagai "dihentikan" —
+    // jangan tunggu run_finished via SSE. Run bisa butuh belasan detik
+    // untuk membereskan panggilan LLM yang sedang jalan (live 2026-11-28:
+    // run_e03e3314 selesai "stopped" 21 dtk setelah Allow), dan selama itu
+    // tampilan tetap "Bekerja" sehingga pengguna mengira tombol Stop tidak
+    // jalan. EventSource-nya tetap dibuka supaya run_finished yang datang
+    // belakangan tetap bisa menutup bersih + menjalankan antrean; yang
+    // dilepas di sini cuma peta sibuk (input langsung hidup lagi).
+    closeApproval();
+    if (state.think) finishThink("stopped", state.think.count);
+    const stopSessionId = state.runSessions.get(runId);
+    if (
+      stopSessionId !== undefined &&
+      state.runs.get(stopSessionId) === runId
+    ) {
+      state.runs.delete(stopSessionId);
+    }
+    refreshBusyUI();
+    toast("Agent dihentikan.");
   } catch {
     toast("Gagal mengirim perintah henti.");
   }
@@ -2676,7 +2698,7 @@ async function restoreSession(sessionId) {
             e.type === "approval_resolved" &&
             e.approval_id === req.approval_id,
         );
-      if (req && !resolved) openApproval(req);
+      if (req && !resolved) openApproval(req, liveRun.run_id);
     }
   }
   // One version per run; content is the current workspace file (older runs were

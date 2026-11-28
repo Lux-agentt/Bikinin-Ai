@@ -270,6 +270,16 @@ describe("nama + logo luxagent", () => {
     );
     expect(prompt).toContain("baca semuanya dengan `read_skill` dulu");
   });
+
+  it("pratinjau pakai tool preview, bukan server manual", () => {
+    const prompt = readFileSync(
+      new URL("../prompts/system-prompt.md", import.meta.url),
+      "utf8",
+    );
+    expect(prompt).toContain("Untuk pratinjau website pakai tool `preview`");
+    expect(prompt).toContain("JANGAN jalankan server sendiri");
+    expect(prompt).toContain("python3 -m http.server");
+  });
 });
 
 describe("pemilih model dropdown", () => {
@@ -334,7 +344,12 @@ describe("pindah chat bolak-balik (riwayat / Tab Baru)", () => {
     expect(js).toContain(
       'find((e) => e.type === "approval_requested")',
     );
-    expect(js).toContain("if (req && !resolved) openApproval(req);");
+    expect(js).toContain("if (req && !resolved) openApproval(req, liveRun.run_id);");
+    // openApproval menerima run_id eksplisit: kejadian riwayat tidak
+    // membawa run_id, dan ownRunId() masih null saat reattach belum
+    // selesai — tanpa ini jawabannya selalu ditolak "sudah tidak aktif".
+    expect(js).toContain("function openApproval(e, runId) {");
+    expect(js).toContain("state.approvalRunId = runId ?? e.run_id ?? ownRunId();");
   });
 
   it("resetSession membersihkan blok think + timer yang nyangkut", () => {

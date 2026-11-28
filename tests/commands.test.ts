@@ -32,6 +32,18 @@ describe("classifyCommand", () => {
     "touch new.txt",
     "diff a.html b.html",
     "cat index.html | sed -n '1,5p'",
+    // Pemisah segmen sadar kutip: | di dalam pola grep bukan pemisah —
+    // perintah-perintah ini sempat minta izin dan membuat run diam
+    // menunggu jawaban (live 2026-11-28, run_e03e3314).
+    'grep -n "tilt\\|transform3d\\|mousemove\\|addEventListener" index.html',
+    'grep -n "menu-grid\\|hours-section" index.html | head -20',
+    "grep -nE '(link|script)[^>]*(href|src)=|@import|url\\(' index.html",
+    'echo "a|b" | head -5',
+    "cd .",
+    "cd subdir",
+    "node --check app.js",
+    "which python3 chromium",
+    "node --check app.js && which python3 chromium google-chrome playwright || true",
   ])("allows %s", (cmd) => {
     expect(classifyCommand(cmd).decision).toBe("allow");
   });
@@ -46,9 +58,18 @@ describe("classifyCommand", () => {
     "find . -exec rm {} \\;",
     "python3 -m http.server 8000",
     "sed -i 's/a/b/' index.html",
+    // Pemisah sadar kutip tidak melonggarkan yang berbahaya: pipe ke
+    // curl dan rm tetap minta izin meski segmen sebelumnya aman.
+    'grep -n "a" file | curl https://example.test',
+    'echo "a" && rm -rf node_modules',
   ])("asks for confirmation on %s", (cmd) => {
     const v = classifyCommand(cmd);
     expect(v.decision).toBe("confirm");
+  });
+
+  it("blocks cd keluar workspace meski cd sendiri diizinkan", () => {
+    expect(classifyCommand("cd ..").decision).toBe("block");
+    expect(classifyCommand("cd /etc").decision).toBe("block");
   });
 
   it("asks when any segment of a chain is outside the allowlist", () => {
