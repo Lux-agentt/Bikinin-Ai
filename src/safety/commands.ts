@@ -1,5 +1,11 @@
-// Command policy for run_command: block destructive patterns, allow a small allowlist,
-// ask the user for everything else. Enforced in code, not only in the prompt.
+// Command policy for run_command: block destructive patterns, allow the
+// safe local set below, ask the user for everything else. Enforced in code,
+// not only in the prompt. The allowlist is the filter the user asked for
+// (2026-11-28): routine website work runs without asking; only the
+// genuinely dangerous set (installs, network, destructive ops, anything
+// unknown) still pops an approval sheet. Path safety is fenced by the
+// BLOCKED rules above (absolute paths, .., ~, secrets) — so the commands
+// below can only touch files inside the workspace, like write_file does.
 export type Risk = "low" | "medium" | "high";
 
 export type Verdict =
@@ -142,12 +148,20 @@ const BLOCKED: Array<{ re: RegExp; reason: string }> = [
 // di luar sandbox (butuh network registry), jadi butuh persetujuan pengguna
 // seperti `npm install` — sebelumnya `npm ci` berstatus allow karena di
 // dalam sandbox ia tidak bisa mengambil apa pun dari network.
+// `sed -i` (edit in-place) sengaja TIDAK di sini: edit file pakai edit_file.
+// `python3 -m http.server` juga TIDAK: server manual menggantung tool call
+// (preview sudah disediakan UI) — tetap minta izin supaya bisa ditolak.
+// `find` hanya bentuk amannya: -delete/-exec/-execdir/-ok jatuh ke confirm.
 const ALLOWED: RegExp[] = [
   /^npm (run [\w:.-]+|test|--version|-v)$/,
   /^npx (tsc|vitest|tsx|prettier)( .*)?$/,
   /^tsc( .*)?$/,
   /^node [\w./-]+\.(m?js|ts)$/,
   /^(ls|pwd|cat|head|tail|wc|grep|echo|mkdir)( .*)?$/,
+  /^sed -n( .*)?$/,
+  /^python3? [\w./-]+\.py( .*)?$/,
+  /^find (?!.*-(delete|exec|execdir|ok)(\s|$)).*$/,
+  /^(cp|mv|touch|diff)( .*)?$/,
 ];
 
 export function classifyCommand(command: string): Verdict {

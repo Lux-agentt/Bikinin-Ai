@@ -138,8 +138,9 @@ describe("sandbox: perintah sah tetap jalan", () => {
     // dimatikan sandbox, bukan classifier.
     "wget https://example.test/file.txt",
     "curl -X POST https://example.test",
-    // Skrip interpreter via file tetap "confirm", bukan block.
-    "python3 script.py",
+    // Skrip interpreter via file (python3 script.py) SUDAH "allow" sejak
+    // filter 2026-11-28 (sama kelasnya dengan node file.js yang memang
+    // sudah allow) — yang tersisa di sini cuma node --version (bukan file).
     "node --version",
   ])("asks for confirmation on %s", (cmd) => {
     expect(classifyCommand(cmd).decision).toBe("confirm");

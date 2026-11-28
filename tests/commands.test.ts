@@ -21,17 +21,35 @@ describe("classifyCommand", () => {
     "ls -la",
     "npm test",
     "cat index.html | head -n 5",
+    // Kerja website rutin: baca potongan file, jalanin skrip, cari file,
+    // rapikan file — tanpa lembar persetujuan (filter 2026-11-28).
+    "sed -n '61,437p' index.html",
+    "python3 script.py",
+    "python3 build.py --out dist",
+    'find . -name "*.html"',
+    "cp index.html backup.html",
+    "mv old.html new.html",
+    "touch new.txt",
+    "diff a.html b.html",
+    "cat index.html | sed -n '1,5p'",
   ])("allows %s", (cmd) => {
     expect(classifyCommand(cmd).decision).toBe("allow");
   });
 
-  it.each(["npm install", "rm -rf node_modules", "curl https://example.test"])(
-    "asks for confirmation on %s",
-    (cmd) => {
-      const v = classifyCommand(cmd);
-      expect(v.decision).toBe("confirm");
-    },
-  );
+  it.each([
+    "npm install",
+    "rm -rf node_modules",
+    "curl https://example.test",
+    // Bentuk berbahayanya tetap minta izin: find penghapus/eksekusi,
+    // server manual (menggantung run), edit in-place (pakai edit_file).
+    "find . -delete",
+    "find . -exec rm {} \\;",
+    "python3 -m http.server 8000",
+    "sed -i 's/a/b/' index.html",
+  ])("asks for confirmation on %s", (cmd) => {
+    const v = classifyCommand(cmd);
+    expect(v.decision).toBe("confirm");
+  });
 
   it("asks when any segment of a chain is outside the allowlist", () => {
     expect(classifyCommand("npm run build && curl https://example.test").decision).toBe(

@@ -257,14 +257,33 @@ describe("web server", () => {
         },
       },
     );
-    const a = manager.start({ message: "satu" });
-    const b = manager.start({ message: "dua" });
-    const c = manager.start({ message: "tiga" });
+    const a = manager.start({
+      message: "satu",
+      attachment_ids: [],
+      effort: "sedang",
+    });
+    const b = manager.start({
+      message: "dua",
+      attachment_ids: [],
+      effort: "sedang",
+    });
+    const c = manager.start({
+      message: "tiga",
+      attachment_ids: [],
+      effort: "sedang",
+    });
     expect(new Set([a.session_id, b.session_id, c.session_id]).size).toBe(3);
     expect(() =>
-      manager.start({ message: "lagi", session_id: a.session_id }),
+      manager.start({
+        message: "lagi",
+        session_id: a.session_id,
+        attachment_ids: [],
+        effort: "sedang",
+      }),
     ).toThrow(BusyError);
-    expect(() => manager.start({ message: "empat" })).toThrow(BusyError);
+    expect(() =>
+      manager.start({ message: "empat", attachment_ids: [], effort: "sedang" }),
+    ).toThrow(BusyError);
     // Biarkan ketiganya selesai sendiri, lalu pastikan tidak ada yang nyangkut.
     await new Promise((r) => setTimeout(r, 500));
     for (const runId of [a.run_id, b.run_id, c.run_id]) {
