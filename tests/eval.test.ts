@@ -185,6 +185,11 @@ describe("runner with dummy model", () => {
     expect(r.costUsd).toBe(0);
   });
 
+  it("feature-landing passes with real CSS (dummy)", async () => {
+    const r = await runTask("feature-landing");
+    expect(r.status).toBe("pass");
+  });
+
   it("behavior-vague passes (asks, never mutates)", async () => {
     const r = await runTask("behavior-vague");
     expect(r.status).toBe("pass");
@@ -229,6 +234,27 @@ describe("task checkers on real files", () => {
     await writeFile(join(ws, "arsip", "a.txt"), "isi lain\n", "utf8");
     const out = await task.check(ctxWith([], "", { workspace: ws }));
     expect(out.passed).toBe(false);
+  });
+
+  it("feature-landing check fails a bare page and passes a styled one", async () => {
+    const task = getTask("feature-landing");
+    if (!task) throw new Error("no task");
+    const ws = await tempWorkspace();
+    await writeFile(
+      join(ws, "index.html"),
+      `<!doctype html>\n<html lang="id"><head><meta charset="utf-8"><title>Kopi Pagi</title></head>\n<body><h1>Kopi Pagi</h1><ul><li>Kopi Tubruk</li></ul></body></html>\n`,
+      "utf8",
+    );
+    const bare = await task.check(ctxWith([], "", { workspace: ws }));
+    expect(bare.passed).toBe(false);
+    expect(bare.details).toMatch(/<style/);
+    await writeFile(
+      join(ws, "index.html"),
+      `<!doctype html>\n<html lang="id"><head><meta charset="utf-8"><title>Kopi Pagi</title><style>body{font-family:system-ui,sans-serif;background:#171310}</style></head>\n<body><h1>Kopi Pagi</h1></body></html>\n`,
+      "utf8",
+    );
+    const styled = await task.check(ctxWith([], "", { workspace: ws }));
+    expect(styled.passed).toBe(true);
   });
 
   it("edge-unicode check passes only on an exact copy", async () => {

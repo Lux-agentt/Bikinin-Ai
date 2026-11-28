@@ -58,6 +58,14 @@ const fmtIdr = (usd) =>
   );
 const fmtKb = (bytes) => (bytes / 1024).toFixed(1).replace(".", ",") + " KB";
 const tpl = (id) => $(id).content.firstElementChild.cloneNode(true);
+/** Tulis teks hanya bila elemennya ada di DOM. Elemen preview folder
+ *  (#fhCount, #fsCount, ...) tinggal di dalam #hero, jadi null saat
+ *  pengguna sedang berada di dalam chat — tanpa guard ini, tiap
+ *  syncFolderPreviews() melempar dan renderRail() tidak pernah jalan. */
+function setTextIfPresent(sel, text) {
+  const el = $(sel);
+  if (el) el.textContent = text;
+}
 const shortText = (s, n) => {
   const a = Array.from(String(s ?? ""));
   return a.length > n
@@ -398,30 +406,34 @@ async function fetchJson(path) {
 function syncFolderPreviews() {
   fetchJson("/api/sessions")
     .then((sessions) => {
-      $("#fhCount").textContent = `${sessions.length} proyek tersimpan`;
-      $("#fhSheet1").textContent = sessions[0]
-        ? shortText(sessions[0].title, 15)
-        : "—";
-      $("#fhSheet2").textContent = sessions[1]
-        ? shortText(sessions[1].title, 15)
-        : "—";
+      setTextIfPresent("#fhCount", `${sessions.length} proyek tersimpan`);
+      setTextIfPresent(
+        "#fhSheet1",
+        sessions[0] ? shortText(sessions[0].title, 15) : "—",
+      );
+      setTextIfPresent(
+        "#fhSheet2",
+        sessions[1] ? shortText(sessions[1].title, 15) : "—",
+      );
       renderRail(sessions);
     })
     .catch(() => {
-      $("#fhCount").textContent = "riwayat tak termuat";
+      setTextIfPresent("#fhCount", "riwayat tak termuat");
     });
   fetchJson("/api/skills")
     .then((skills) => {
-      $("#fsCount").textContent = `${skills.length} skill aktif`;
-      $("#fsSheet1").textContent = skills.length
-        ? shortText(skills[skills.length - 1].name, 16)
-        : "—";
-      $("#fsSheet2").textContent = skills[0]
-        ? shortText(skills[0].name, 16)
-        : "—";
+      setTextIfPresent("#fsCount", `${skills.length} skill aktif`);
+      setTextIfPresent(
+        "#fsSheet1",
+        skills.length ? shortText(skills[skills.length - 1].name, 16) : "—",
+      );
+      setTextIfPresent(
+        "#fsSheet2",
+        skills[0] ? shortText(skills[0].name, 16) : "—",
+      );
     })
     .catch(() => {
-      $("#fsCount").textContent = "skill tak termuat";
+      setTextIfPresent("#fsCount", "skill tak termuat");
     });
 }
 
@@ -1454,7 +1466,7 @@ function fitThumb(wrap, iframe) {
   const scale = w / 1024;
   iframe.style.transform = `scale(${scale.toFixed(4)})`;
   wrap.style.height =
-    Math.max(150, Math.min(210, Math.round(560 * scale))) + "px";
+    Math.max(150, Math.min(320, Math.round(560 * scale))) + "px";
 }
 
 async function fetchText(path) {
@@ -2142,6 +2154,8 @@ function resetSession() {
   }
   closeOverlay();
   closeFolderSheet();
+  clearInterval(state.timerInt);
+  state.think = null;
   main.replaceChildren(heroEl);
   state.runId = null;
   state.sessionId = null;
@@ -2177,6 +2191,7 @@ async function restoreSession(sessionId) {
   closeFolderSheet();
   closeOverlay();
   state.sessionId = detail.session_id;
+  state.runId = null;
   state.versions = [];
   state.activeVersion = -1;
   state.resultCard = null;
@@ -2184,12 +2199,27 @@ async function restoreSession(sessionId) {
   state.revDismissed = false;
   main.replaceChildren();
   state.replaying = true;
-  for (const run of detail.runs) {
-    state.explainEl = null;
-    state.explainRaw = "";
-    for (const ev of run.events) handle(ev);
+  try {
+    for (const run of detail.runs) {
+      state.explainEl = null;
+      state.explainRaw = "";
+      for (const ev of run.events) {
+        try {
+          handle(ev);
+        } catch (err) {
+          // Satu kejadian rusak tidak boleh menggagalkan seluruh restore:
+          // lewati dan lanjut ke kejadian berikutnya.
+          console.warn("restore: lewati kejadian rusak", err);
+        }
+      }
+    }
+  } finally {
+    state.replaying = false;
+    // Run yang mati tanpa run_finished (mis. server restart) menyisakan
+    // blok think + timer yang jalan terus — tutup paksa supaya tidak
+    // nyangkut dan run berikutnya dapat blok think baru yang bersih.
+    if (state.think) finishThink("stopped", state.think.count);
   }
-  state.replaying = false;
   // One version per run; content is the current workspace file (older runs were
   // overwritten, so no snapshot is faked for them).
   state.versions = detail.runs

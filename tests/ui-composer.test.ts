@@ -13,6 +13,10 @@ const js = readFileSync(
   new URL("../public/app.js", import.meta.url),
   "utf8",
 );
+const server = readFileSync(
+  new URL("../src/server/http.ts", import.meta.url),
+  "utf8",
+);
 
 describe("composer buttons (HP: target sentuh besar)", () => {
   it("tombol aksi 40px, tombol kirim 44px", () => {
@@ -90,5 +94,107 @@ describe("unduh transkrip di riwayat", () => {
       /tr\.href = `\/api\/sessions\/\$\{sess\.session_id\}\/transcript`/,
     );
     expect(js).toMatch(/item\.append\(mainEl, dl, tr, del\)/);
+  });
+});
+
+describe("nama + logo kuxagent", () => {
+  it("judul, meta, dan wordmark memakai kuxagent (bukan Bikinin)", () => {
+    expect(html).toContain("<title>kuxagent — Studio Agent Web Builder</title>");
+    expect(html).toContain(
+      'content="kuxagent — Studio Agent Web Builder.',
+    );
+    expect(html).toContain(
+      'kux<span class="ai grad-text">agent</span>',
+    );
+    expect(html).not.toContain("Bikinin");
+  });
+
+  it("logo baru dipakai di rail, header, hero + favicon", () => {
+    expect(html).toContain(
+      '<link rel="icon" href="/logo.png" type="image/png" />',
+    );
+    expect(html.match(/<img src="\/logo\.png" alt="kuxagent"/g)).toHaveLength(
+      3,
+    );
+    expect(css).toMatch(/\.logo-tile img\s*\{[^}]*object-fit:\s*cover/);
+  });
+
+  it("server melayani /logo.png sebagai aset statis", () => {
+    expect(server).toContain('"/logo.png"');
+    expect(server).toContain('type: "image/png"');
+  });
+
+  it("identitas agent di system prompt memakai kuxagent", () => {
+    const prompt = readFileSync(
+      new URL("../prompts/system-prompt.md", import.meta.url),
+      "utf8",
+    );
+    expect(prompt).toContain("Kamu adalah kuxagent,");
+    expect(prompt).not.toContain("Bikinin AI");
+  });
+});
+
+describe("pindah chat bolak-balik (riwayat / Tab Baru)", () => {
+  it("syncFolderPreviews tahan saat hero tidak di DOM (tidak melempar)", () => {
+    // Elemen preview folder tinggal di dalam #hero; saat pengguna berada
+    // di dalam chat, hero terlepas dan $("#fhCount") null — tulis langsung
+    // melempar dan renderRail() tidak pernah jalan.
+    expect(js).toContain("function setTextIfPresent(sel, text)");
+    expect(js).not.toMatch(/\$\("#fhCount"\)\.textContent/);
+    expect(js).not.toMatch(/\$\("#fsCount"\)\.textContent/);
+    expect(js).toMatch(
+      /function syncFolderPreviews\(\) \{[\s\S]*?renderRail\(sessions\)/,
+    );
+  });
+
+  it("restoreSession: satu kejadian rusak tidak menggagalkan restore; think run putus ditutup", () => {
+    expect(js).toMatch(
+      /async function restoreSession\(sessionId\) \{[\s\S]*?state\.runId = null/,
+    );
+    expect(js).toMatch(
+      /async function restoreSession\(sessionId\) \{[\s\S]*?try \{[\s\S]*?for \(const ev of run\.events\) \{[\s\S]*?handle\(ev\)/,
+    );
+    expect(js).toMatch(
+      /async function restoreSession\(sessionId\) \{[\s\S]*?finally \{[\s\S]*?state\.replaying = false[\s\S]*?if \(state\.think\) finishThink\("stopped", state\.think\.count\)/,
+    );
+  });
+
+  it("resetSession membersihkan blok think + timer yang nyangkut", () => {
+    expect(js).toMatch(
+      /function resetSession\(\) \{[\s\S]*?clearInterval\(state\.timerInt\)[\s\S]*?state\.think = null/,
+    );
+  });
+
+  it("riwayat bisa diklik dan Tab Baru memanggil resetSession", () => {
+    expect(js).toContain("void restoreSession(sess.session_id)");
+    expect(js).toContain(
+      '$("#resetBtn").addEventListener("click", resetSession)',
+    );
+    expect(js).toContain(
+      '$("#railNew").addEventListener("click", resetSession)',
+    );
+  });
+});
+
+describe("kartu preview: konten tidak terpotong, badge tidak menumpuk", () => {
+  it("fitThumb mengizinkan tinggi sampai 320px", () => {
+    expect(js).toMatch(
+      /Math\.max\(150, Math\.min\(320, Math\.round\(560 \* scale\)\)\)/,
+    );
+  });
+
+  it("badge Live pindah ke result-top (di samping ver-pills), bukan di atas iframe", () => {
+    const badgeAt = html.indexOf('class="thumb-badge"');
+    const pillsAt = html.indexOf('class="ver-pills"');
+    expect(badgeAt).toBeGreaterThan(pillsAt);
+    const wrapBlock = html.match(
+      /<div class="thumb-wrap"[^>]*>([\s\S]*?)<\/div>/,
+    );
+    expect(wrapBlock).not.toBeNull();
+    expect(wrapBlock![1]).not.toContain("thumb-badge");
+    expect(css).toMatch(/\.thumb-badge\s*\{[^}]*position:\s*static/);
+    expect(css).not.toMatch(/\.thumb-badge\s*\{[^}]*position:\s*absolute/);
+    expect(css).not.toMatch(/\.thumb-badge\s*\{[^}]*backdrop-filter/);
+    expect(js).toContain('card.querySelector(".thumb-badge")');
   });
 });

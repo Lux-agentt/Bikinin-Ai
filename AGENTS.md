@@ -193,7 +193,7 @@ Supaya agent makin mirip Claude Code / Codex / Grok: bisa mencari di internet, b
 
 ### Fase 6: Makin pintar — verifikasi, ingatan pelajaran, vision, penutup gap vs Claude Code
 
-- [x] Self-check: agent memeriksa hasil sendiri sebelum menyatakan selesai (build/test/lint yang relevan, atau baca ulang jawaban terhadap permintaan awal), maks 2 putaran perbaikan, hasil tercatat sebagai event.
+- [x] Self-check: agent memeriksa hasil sendiri sebelum menyatakan selesai (build/test/lint yang relevan, atau baca ulang jawaban terhadap permintaan awal), maks 2 putaran perbaikan, hasil tercatat sebagai event. Halaman HTML penuh wajib lolos cek tampilan minimal (CSS nyata + font + warna, nav bukan bullet list polos — `src/agent/self-check.ts`).
 - [x] Ingatan episodik: pelajaran dari run yang gagal/berulang disimpan ke `workspace/.bikinin/lessons.md` (maks 32 KB, tanpa rahasia); pelajaran relevan di-inject ke system prompt run berikutnya (cocok kata kunci).
 - [x] Vision: tool `inspect_image` mengirim gambar ke model yang mendukung image input; fallback ke model berikutnya yang mendukung, atau jujur melapor bila tidak tersedia.
 - [x] Plan mode: tugas besar meminta persetujuan rencana sebelum mengubah file (pakai dialog approval yang sudah ada).

@@ -373,3 +373,26 @@ describe("hot reload skill (Fase 8)", () => {
     expect(manager.get(run.run_id)?.events.at(-1)?.type).toBe("run_finished");
   });
 });
+
+describe("website skill: mandatory styling rules (regression lock)", () => {
+  it("skill website memuat aturan CSS wajib + cek kualitas visual", async () => {
+    const text = await readSkill(REPO_SKILLS_DIR, "website");
+    for (const marker of [
+      "CSS wajib",
+      "CSS minimal wajib",
+      "Cek kualitas visual",
+      "nav-list",
+      "font-family",
+    ]) {
+      expect(text).toContain(marker);
+    }
+  });
+
+  it("system prompt memuat standar CSS nyata untuk website", async () => {
+    const prompt = await loadSystemPrompt(
+      formatSkillList(await listSkills(REPO_SKILLS_DIR)),
+    );
+    expect(prompt).toContain("Setiap halaman WAJIB punya CSS nyata");
+    expect(prompt).toContain("Cek kualitas visual");
+  });
+});

@@ -33,6 +33,54 @@ Baca skill ini sampai habis SEBELUM menulis file pertama.
 - Jarak dan ukuran konsisten: satu skala spasi (mis. 8/16/24/32px) dan maksimal 3 ukuran judul.
 - Gambar: pakai yang relevan; kalau tidak ada gambar, pakai warna, bentuk, dan tipografi — jangan pasang gambar asal-asalan.
 
+## CSS wajib — jangan kirim halaman polos
+
+Aturan ini MENGIKAT, bukan saran. Halaman yang dikirim tanpa CSS nyata adalah hasil yang GAGAL, seberapa pun benar isinya.
+
+- Setiap halaman HTML penuh WAJIB memuat CSS nyata: blok `<style>` di `<head>` atau file CSS yang di-link. Jangan pernah kirim halaman yang dirender dengan tampilan default browser.
+- Tampilan default browser yang DILARANG: font serif Times, link biru standar (`#0000EE`), nav berupa bullet list vertikal, teks menempel ke tepi layar tanpa padding, tanpa warna latar.
+- CSS minimal yang wajib ada (sesuaikan palet dengan konteks, strukturnya jangan dihilangkan):
+  - Variabel palet: `--bg`, `--surface`, `--text`, `--muted`, `--accent`, `--line`.
+  - `font-family` eksplisit di `body` (tumpukan font sistem, mis. `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`) dan `line-height` minimal 1.5.
+  - `header` dengan `display: flex` + `justify-content: space-between`; nav berupa daftar horizontal (`display: flex; gap; list-style: none`) — JANGAN `<ul>` polos di dalam `<nav>`.
+  - Hero: `padding` besar + `h1` dengan ukuran jelas + satu tombol CTA (`.btn`: warna aksen, teks kontras, `border-radius`, `padding`).
+  - Kartu/konten: `background` permukaan + `border` + `border-radius` + `padding`.
+  - Satu aturan responsif (`@media (min-width: 768px)`) untuk layar besar.
+- Contoh kerangka CSS minimal wajib (ganti paletnya sesuai konteks, jangan hapus bagiannya):
+
+```css
+:root {
+  --bg: #171310; --surface: #241d18; --text: #f5efe6; --muted: #c9b8a3;
+  --accent: #d97706; --accent-text: #1a120b; --line: #3a2f26;
+  --radius: 14px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; }
+a { color: var(--accent); text-decoration: none; }
+header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; }
+.nav-list { display: flex; gap: 20px; list-style: none; margin: 0; padding: 0; }
+.nav-list a { color: var(--text); }
+.hero { padding: 56px 20px; text-align: center; }
+.hero h1 { font-size: 2rem; margin: 0 0 12px; }
+.btn { display: inline-block; background: var(--accent); color: var(--accent-text); padding: 12px 24px; border-radius: 999px; font-weight: 700; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+@media (min-width: 768px) { .hero h1 { font-size: 2.75rem; } }
+```
+
+- Struktur HTML-nya mengikuti CSS di atas: `<header>` berisi nama + `<nav><ul class="nav-list">`, lalu `<main>` berisi `<section class="hero">` dan kartu konten. Jangan menulis `<nav><ul>` tanpa class.
+- Model yang lemah di desain WAJIB meniru kerangka di atas (ganti palet + teks saja) daripada mengarang dari nol — kerangka yang ditiru dan diisi benar lebih baik daripada halaman polos.
+
+## Cek kualitas visual (sebelum menyatakan selesai)
+
+Selain "Cara menguji" di bawah, jalankan cek ini untuk SETIAP halaman yang dibuat/diubah — ini yang dicek self-check kode (lihat `src/agent/self-check.ts`) dan harus lolos sebelum run dinyatakan selesai:
+
+1. File `.html` halaman penuh memuat `<style>` atau link stylesheet — kalau tidak ada, GAGAL.
+2. CSS-nya mendeklarasikan `font-family` dan minimal satu warna (hex/`rgb`) — kalau tidak ada, GAGAL.
+3. Nav (bila ada) bukan bullet list polos: `<ul>` di dalam `<nav>` wajib punya `class` dan ditata flex — kalau tidak ada, GAGAL.
+4. Halaman punya `header` + hero + CTA — kalau tidak ada, perbaiki.
+5. Buka preview dan LIHAT hasilnya (pakai `inspect_image` bila tersedia): halaman tidak boleh terlihat seperti dokumen polos — font default, link biru, bullet list = GAGAL, perbaiki dulu.
+
 ## Responsif
 - Mobile dulu: tulis CSS untuk layar kecil, lalu tambah aturan untuk layar besar (`min-width: 768px`, `min-width: 1080px`).
 - Wajib ada `<meta name="viewport" content="width=device-width, initial-scale=1">`.
@@ -56,6 +104,7 @@ Baca skill ini sampai habis SEBELUM menulis file pertama.
 - Baca semua teks sekali lagi: tidak ada lorem ipsum, tidak ada placeholder, ejaan benar.
 
 ## Kesalahan umum
+- Mengirim halaman tanpa CSS nyata (tampilan default browser: serif Times, link biru, nav bullet list). Ini hasil GAGAL — lihat "CSS wajib" di atas.
 - Membuat halaman yang terlihat seperti template: hero generik + 3 kartu fitur + footer. Kalau bisa dipakai untuk produk apa pun, desainnya belum punya karakter.
 - Menambah animasi berat sebelum kontennya benar. Konten dulu, hiasan belakangan.
 - Mengabaikan HP: menguji hanya di layar besar lalu menganggap selesai.

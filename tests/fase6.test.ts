@@ -154,6 +154,117 @@ describe("runSelfCheck", () => {
     expect(r.outcome).toBe("fail");
     expect(r.checks.filter((c) => !c.ok).length).toBeGreaterThanOrEqual(2);
   });
+
+  const BARE_PAGE = `<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><title>Kopi</title></head>
+<body><h1>Kopi</h1><p>Deskripsi.</p></body></html>
+`;
+  const STYLED_PAGE = `<!doctype html>
+<html lang="id"><head><meta charset="utf-8"><title>Kopi</title>
+<style>body{margin:0;background:#171310;color:#f5efe6;font-family:system-ui,sans-serif;line-height:1.6}</style></head>
+<body><header><strong>Kopi</strong><nav><ul class="nav-list"><li><a href="#menu">Menu</a></li></ul></nav></header>
+<main><h1>Kopi</h1><p>Deskripsi.</p></main></body></html>
+`;
+
+  it("fails a full HTML page without real CSS", async () => {
+    const ws = await tempWorkspace();
+    await writeFile(join(ws, "index.html"), BARE_PAGE);
+    const r = await runSelfCheck({
+      workspace: ws,
+      files: ["index.html"],
+      finalText: "Selesai.",
+    });
+    expect(r.outcome).toBe("fail");
+    expect(r.checks.find((c) => c.name === "tampilan index.html")?.ok).toBe(
+      false,
+    );
+    expect(formatSelfCheckFeedback(r, 1)).toMatch(/CSS/);
+  });
+
+  it("passes a full HTML page with real CSS and a classed nav list", async () => {
+    const ws = await tempWorkspace();
+    await writeFile(join(ws, "index.html"), STYLED_PAGE);
+    const r = await runSelfCheck({
+      workspace: ws,
+      files: ["index.html"],
+      finalText: "Selesai.",
+    });
+    expect(r.outcome).toBe("pass");
+    expect(r.checks.every((c) => c.ok)).toBe(true);
+  });
+
+  it("fails a nav that is still a bare bullet list", async () => {
+    const ws = await tempWorkspace();
+    const bareNav = STYLED_PAGE.replace(
+      '<ul class="nav-list">',
+      "<ul>",
+    );
+    await writeFile(join(ws, "index.html"), bareNav);
+    const r = await runSelfCheck({
+      workspace: ws,
+      files: ["index.html"],
+      finalText: "Selesai.",
+    });
+    expect(r.outcome).toBe("fail");
+    expect(r.checks.find((c) => c.name === "nav index.html")?.ok).toBe(false);
+    // CSS checks still pass — only the nav is at fault.
+    expect(r.checks.find((c) => c.name === "css index.html")?.ok).toBe(true);
+  });
+
+  it("fails CSS without a font and without a color", async () => {
+    const ws = await tempWorkspace();
+    const noFont = STYLED_PAGE.replace(
+      "font-family:system-ui,sans-serif;",
+      "",
+    ).replace("#171310", "var(--bg)").replace("#f5efe6", "var(--text)");
+    await writeFile(join(ws, "index.html"), noFont);
+    const r = await runSelfCheck({
+      workspace: ws,
+      files: ["index.html"],
+      finalText: "Selesai.",
+    });
+    expect(r.outcome).toBe("fail");
+    expect(r.checks.find((c) => c.name === "css index.html")?.ok).toBe(false);
+  });
+
+  it("passes an external stylesheet that is part of the run", async () => {
+    const ws = await tempWorkspace();
+    await writeFile(
+      join(ws, "index.html"),
+      `<!doctype html>\n<html lang="id"><head><meta charset="utf-8"><link rel="stylesheet" href="app.css"></head>\n<body><h1>Kopi</h1></body></html>\n`,
+    );
+    await writeFile(
+      join(ws, "app.css"),
+      "body{background:#171310;color:#f5efe6;font-family:system-ui,sans-serif}\n",
+    );
+    const r = await runSelfCheck({
+      workspace: ws,
+      files: ["index.html", "app.css"],
+      finalText: "Selesai.",
+    });
+    expect(r.outcome).toBe("pass");
+  });
+
+  it("skips HTML fragments and unverifiable external stylesheets", async () => {
+    const ws = await tempWorkspace();
+    await writeFile(join(ws, "frag.html"), "<section><h2>Cuplikan</h2></section>\n");
+    await writeFile(
+      join(ws, "index.html"),
+      `<!doctype html>\n<html lang="id"><head><meta charset="utf-8"><link rel="stylesheet" href="lama.css"></head>\n<body><h1>Kopi</h1></body></html>\n`,
+    );
+    const r = await runSelfCheck({
+      workspace: ws,
+      files: ["frag.html", "index.html"],
+      finalText: "Selesai.",
+    });
+    expect(r.outcome).toBe("pass");
+    expect(r.checks.some((c) => c.name.startsWith("tampilan frag"))).toBe(
+      false,
+    );
+    expect(
+      r.checks.find((c) => c.name === "css index.html")?.detail,
+    ).toMatch(/tidak diperiksa/);
+  });
 });
 
 describe("Fase 6 wiring", () => {

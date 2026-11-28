@@ -157,25 +157,47 @@ console.log(sum([1, 2, 3, 4, 5]));
     check: async (ctx) => {
       const text = await readText(ctx, "index.html");
       if (text === null) return fail("index.html tidak dibuat");
-      for (const needle of ["Kopi Pagi", "<h1", "</html>"]) {
+      for (const needle of [
+        "Kopi Pagi",
+        "<h1",
+        "</html>",
+        "<style",
+        "font-family",
+      ]) {
         if (!text.includes(needle))
           return fail(`index.html tidak memuat "${needle}"`);
       }
-      return pass("index.html memuat judul, h1, dan penutup html");
+      return pass(
+        "index.html memuat judul, h1, penutup html, dan CSS nyata (style + font)",
+      );
     },
     dummyScript: [
       withCalls(
         call("t1", "write_file", {
           path: "index.html",
           content: `<!doctype html>
-<html lang="id"><head><meta charset="utf-8"><title>Kopi Pagi</title></head>
-<body><h1>Kopi Pagi</h1><p>Kedai kopi rumahan, diseduh pelan setiap pagi.</p>
-<ul><li>Kopi Tubruk</li><li>Kopi Susu Gula Aren</li><li>Es Kopi Pagi</li></ul>
+<html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Kopi Pagi</title>
+<style>
+:root{--bg:#171310;--surface:#241d18;--text:#f5efe6;--muted:#c9b8a3;--accent:#d97706;--accent-text:#1a120b;--line:#3a2f26}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.6}
+a{color:var(--accent);text-decoration:none}
+header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px}
+.nav-list{display:flex;gap:20px;list-style:none;margin:0;padding:0}
+.nav-list a{color:var(--text)}
+.hero{padding:56px 20px;text-align:center}.hero h1{font-size:2rem;margin:0 0 12px}
+.menu{display:grid;gap:16px;padding:0 20px 40px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px}
+.card h2{margin:0 0 8px;font-size:1.15rem}.card p{margin:0;color:var(--muted)}
+@media(min-width:768px){.hero h1{font-size:2.75rem}.menu{grid-template-columns:repeat(3,1fr);max-width:960px;margin:0 auto}}
+</style></head>
+<body><header><strong>Kopi Pagi</strong><nav><ul class="nav-list"><li><a href="#menu">Menu</a></li><li><a href="#tentang">Tentang</a></li></ul></nav></header>
+<main><section class="hero"><h1>Kopi Pagi</h1><p>Kedai kopi rumahan, diseduh pelan setiap pagi.</p></section>
+<section class="menu" id="menu"><article class="card"><h2>Kopi Tubruk</h2><p>Pahit pekat, gula aren.</p></article><article class="card"><h2>Kopi Susu Gula Aren</h2><p>Manis gurih, es batu.</p></article><article class="card"><h2>Es Kopi Pagi</h2><p>Dingin, segar, cepat saji.</p></article></section></main>
 </body></html>
 `,
         }),
       ),
-      finalText("Selesai. Landing page dibuat dengan HTML polos karena tugasnya satu halaman dan supaya cepat dibuka."),
+      finalText("Selesai. Landing page dibuat dengan CSS nyata (palet kopi, nav flex, kartu menu)."),
     ],
   },
   {

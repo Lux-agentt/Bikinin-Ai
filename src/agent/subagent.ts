@@ -62,7 +62,7 @@ export interface DelegateRunnerDeps {
 
 let activeSubagents = 0;
 
-const SUBAGENT_SYSTEM_PROMPT = `Kamu subagent riset Bikinin AI. Tugasmu SATU hal spesifik dari agent utama; kerjakan dengan tool baca saja (list_dir, read_file, read_skill, web_search) dan jawab RINGKAS (maks ~1500 karakter): temuan + file/sumber yang relevan. Jangan menulis atau mengubah file apa pun, jangan memanggil tool lain, jangan bertele-tele. Kalau tidak menemukan jawabannya, katakan terus terang.`;
+const SUBAGENT_SYSTEM_PROMPT = `Kamu subagent riset kuxagent. Tugasmu SATU hal spesifik dari agent utama; kerjakan dengan tool baca saja (list_dir, read_file, read_skill, web_search) dan jawab RINGKAS (maks ~1500 karakter): temuan + file/sumber yang relevan. Jangan menulis atau mengubah file apa pun, jangan memanggil tool lain, jangan bertele-tele. Kalau tidak menemukan jawabannya, katakan terus terang.`;
 
 export function createDelegateRunner(d: DelegateRunnerDeps): DelegateFn {
   return async (task, context) => {
