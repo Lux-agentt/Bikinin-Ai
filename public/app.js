@@ -1224,7 +1224,9 @@ function showCode(title, body) {
   const t = state.think;
   if (!t || !t.codeLive || !body) return;
   t.codeLivePath.textContent = title;
-  t.codeLiveBody.textContent = body;
+  // Panel hanya cuplikan pendek (bukan dinding teks): cukup untuk melihat
+  // apa yang sedang dikerjakan, tanpa memenuhi layar.
+  t.codeLiveBody.textContent = capText(body, 600);
   t.codeLive.hidden = false;
   t.codeLiveBody.scrollTop = t.codeLiveBody.scrollHeight;
   scrollDown();
@@ -1268,13 +1270,14 @@ function formatToolCall(tool, args) {
 function thinkLine(callId, text) {
   const t = state.think;
   if (!t) return;
+  const short = capText(text, 120);
   const line = document.createElement("div");
   line.className = "think-line";
-  line.textContent = text;
+  line.textContent = short;
   t.linesEl.appendChild(line);
-  t.rows.set(callId, { line, text });
+  t.rows.set(callId, { line, text: short });
   t.count += 1;
-  t.labelEl.textContent = text;
+  t.labelEl.textContent = short;
   scrollDown();
 }
 
@@ -1880,9 +1883,10 @@ function handle(e) {
       const row = state.think && state.think.rows.get(e.call_id);
       if (row) {
         row.line.className = "think-line " + (e.ok ? "ok" : "fail");
-        row.line.textContent = e.summary
-          ? `${row.text} — ${e.summary}`
-          : row.text;
+        // Simpel: baris langkah tetap label tool saja — ringkasan (ukuran
+        // file, jumlah karakter, ...) tidak ditempel, biar UI proses tidak
+        // penuh teks.
+        row.line.textContent = row.text;
         // Kode/output asli terbaru tampil di panel think. Label tool:
         // run_command "$ <perintah>", read_file "read_file <path>".
         if (

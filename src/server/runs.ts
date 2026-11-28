@@ -300,7 +300,14 @@ export class RunManager {
         ? this.runs.get(this.activeRunId)
         : undefined;
     if (active && active.sessionId === sessionId) return "busy";
-    for (const runId of m.runIds) this.runs.delete(runId);
+    for (const runId of m.runIds) {
+      const rec = this.runs.get(runId);
+      // The event log drains in the background: wait for pending appends
+      // before removing the files, otherwise a late append recreates the
+      // .jsonl after the delete.
+      if (rec) await rec.log.flush().catch(() => {});
+      this.runs.delete(runId);
+    }
     this.sessions.delete(sessionId);
     this.meta.delete(sessionId);
     await deletePersistedSession(this.opts.workspace, sessionId);

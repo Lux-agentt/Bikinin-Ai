@@ -46,7 +46,6 @@ Aturan ini MENGIKAT, bukan saran. Halaman yang dikirim tanpa CSS nyata adalah ha
   - Hero: `padding` besar + `h1` dengan ukuran jelas + satu tombol CTA (`.btn`: warna aksen, teks kontras, `border-radius`, `padding`).
   - Kartu/konten: `background` permukaan + `border` + `border-radius` + `padding`.
   - Satu aturan responsif (`@media (min-width: 768px)`) untuk layar besar.
- - Simpel, jangan penuh: banyak ruang kosong (padding lega, jarak antar-section besar), satu fokus per layar — tampilan yang lega lebih bagus daripada yang padat.
 - Contoh kerangka CSS minimal wajib (ganti paletnya sesuai konteks, jangan hapus bagiannya):
 
 ```css

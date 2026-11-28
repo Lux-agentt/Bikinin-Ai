@@ -91,6 +91,32 @@ describe("panel kode live menampilkan rencana + tool yang sedang jalan", () => {
   });
 });
 
+describe("UI proses run simpel (tidak penuh teks)", () => {
+  it("baris langkah hanya label tool — ringkasan tidak ditempel", () => {
+    expect(js).not.toContain("— ${e.summary}");
+    expect(js).toMatch(
+      /case "tool_call_finished":[\s\S]*?row\.line\.textContent = row\.text/,
+    );
+  });
+
+  it("panel kode hanya cuplikan pendek, bukan dinding teks", () => {
+    expect(js).toMatch(
+      /function showCode\(title, body\) \{[\s\S]*?capText\(body, 600\)/,
+    );
+  });
+
+  it("baris think dipotong bila terlalu panjang", () => {
+    expect(js).toMatch(
+      /function thinkLine\(callId, text\) \{[\s\S]*?const short = capText\(text, 120\)/,
+    );
+  });
+
+  it("langkah selesai meredup, langkah berjalan bertanda", () => {
+    expect(css).toMatch(/\.think-line\.ok \{[^}]*opacity: 0\.6/);
+    expect(css).toMatch(/\.think-line::before \{[^}]*content: "› "/);
+  });
+});
+
 describe("stop membebaskan UI yang macet", () => {
   it("stopRun mengenali run yang sudah hilang (404) dan mematikan busy", () => {
     expect(js).toMatch(

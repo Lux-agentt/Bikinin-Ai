@@ -2534,6 +2534,13 @@ main::-webkit-scrollbar {
 .hero .logo-tile {
   flex: none;
 }
+.think-line.ok {
+  opacity: 0.6;
+}
+.think-line::before {
+  content: "› ";
+  color: var(--blue-2);
+}
 .think-line.ok::before {
   content: "✓ ";
   color: var(--green);
