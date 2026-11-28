@@ -1,6 +1,8 @@
-// Step and cost budget. Emits 80% and 100% alerts exactly once each.
+// Cost budget (28 Nov 2026: the step limit was removed at the owner's
+// request — runs stop only on cost now, or when the user presses Stop).
+// Emits 80% and 100% cost alerts exactly once each.
 export interface BudgetAlert {
-  kind: "steps" | "cost";
+  kind: "cost";
   used: number;
   limit: number;
   percent: 80 | 100;
@@ -11,9 +13,14 @@ export class Budget {
   costUsd = 0;
   private readonly fired = new Set<string>();
 
+  /**
+   * maxSteps is optional: the main run has NO step limit (removed 28 Nov
+   * 2026 at the owner's request) and passes nothing here; subagents still
+   * pass their own cap (SUBAGENT_MAX_STEPS) so a runaway subagent stops.
+   */
   constructor(
-    readonly maxSteps: number,
     readonly maxCostUsd: number,
+    readonly maxSteps?: number,
   ) {}
 
   addCost(usd: number): void {
@@ -21,7 +28,7 @@ export class Budget {
   }
 
   stepsExceeded(): boolean {
-    return this.steps >= this.maxSteps;
+    return this.maxSteps !== undefined && this.steps >= this.maxSteps;
   }
 
   costExceeded(): boolean {
@@ -30,22 +37,13 @@ export class Budget {
 
   takeAlerts(): BudgetAlert[] {
     const alerts: BudgetAlert[] = [];
-    const checks: Array<{
-      kind: "steps" | "cost";
-      used: number;
-      limit: number;
-    }> = [
-      { kind: "steps", used: this.steps, limit: this.maxSteps },
-      { kind: "cost", used: this.costUsd, limit: this.maxCostUsd },
-    ];
-    for (const c of checks) {
-      const pct = c.limit > 0 ? (c.used / c.limit) * 100 : 100;
-      for (const percent of [80, 100] as const) {
-        const key = `${c.kind}:${percent}`;
-        if (pct >= percent && !this.fired.has(key)) {
-          this.fired.add(key);
-          alerts.push({ ...c, percent });
-        }
+    const c = { kind: "cost" as const, used: this.costUsd, limit: this.maxCostUsd };
+    const pct = c.limit > 0 ? (c.used / c.limit) * 100 : 100;
+    for (const percent of [80, 100] as const) {
+      const key = `${c.kind}:${percent}`;
+      if (pct >= percent && !this.fired.has(key)) {
+        this.fired.add(key);
+        alerts.push({ ...c, percent });
       }
     }
     return alerts;

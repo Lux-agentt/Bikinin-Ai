@@ -311,7 +311,7 @@ describe("RunStarted route field", () => {
       model: NORTH,
       effort: "sedang" as const,
       user_message: "buatkan website",
-      limits: { max_steps: 30, max_cost_usd: 0.5 },
+      limits: { max_cost_usd: 0.5 },
     };
     expect(() =>
       RunStarted.parse({
@@ -349,7 +349,6 @@ describe("RunManager routing (integration)", () => {
       {
         providers,
         BIKININ_USD_IDR: 17000,
-        BIKININ_MAX_STEPS: 10,
         BIKININ_MAX_COST_USD: 1,
         BIKININ_WORKSPACE: "./workspace",
         BIKININ_MAX_VIDEO_SECONDS: 30,

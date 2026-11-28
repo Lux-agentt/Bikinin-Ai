@@ -67,7 +67,7 @@ export const RunStarted = Base.extend({
   model: z.string(),
   effort: z.enum(["sedang", "tinggi"]),
   user_message: z.string(),
-  limits: z.object({ max_steps: z.number().int(), max_cost_usd: z.number() }),
+  limits: z.object({ max_cost_usd: z.number() }),
   route: RouteInfo.optional(),
 });
 

@@ -85,7 +85,6 @@ const cfg: Config = {
     },
   ],
   BIKININ_USD_IDR: 17000,
-  BIKININ_MAX_STEPS: 10,
   BIKININ_MAX_COST_USD: 1,
   BIKININ_WORKSPACE: "./workspace",
   BIKININ_MAX_VIDEO_SECONDS: 30,
@@ -346,6 +345,9 @@ describe("web server", () => {
   });
 
   it("resumes a budget_exceeded run with a fresh budget", async () => {
+    // Budget is cost-only since 28 Nov 2026 (step limit removed): each
+    // scripted chat call costs $0.00014 (100 in @ $1/M + 20 out @ $2/M),
+    // so a $0.0002 cap is exceeded on the second call.
     const { url } = await boot(
       [
         withCalls(plan("t0")),
@@ -357,7 +359,7 @@ describe("web server", () => {
         ),
         finalText("Lanjut selesai."),
       ],
-      { BIKININ_MAX_STEPS: 1 },
+      { BIKININ_MAX_COST_USD: 0.0002 },
     );
     const first = (await (
       await post(`${url}/api/runs`, { message: "buat halaman" })
@@ -596,7 +598,7 @@ describe("web server", () => {
       model: "test-model",
       effort: "sedang",
       user_message: "Buatkan landing page kedai kopi",
-      limits: { max_steps: 10, max_cost_usd: 1 },
+      limits: { max_cost_usd: 1 },
     });
     const finished = AgentEvent.parse({
       v: 1,

@@ -7,7 +7,6 @@ import { resolveProviders, type ProviderConfig } from "./llm/providers.js";
 
 const LimitsSchema = z.object({
   BIKININ_USD_IDR: z.coerce.number().positive().default(17000),
-  BIKININ_MAX_STEPS: z.coerce.number().int().positive().default(30),
   BIKININ_MAX_COST_USD: z.coerce.number().positive().default(0.5),
   BIKININ_WORKSPACE: z
     .string()
@@ -21,7 +20,18 @@ const LimitsSchema = z.object({
   // on/true/1 enable it; see isMemoryModelExtractEnabled below.
   // Optional so older hand-built Config literals still compile.
   BIKININ_MEMORY_MODEL_EXTRACT: z.string().optional(),
+  // Auto-approve low/medium-risk approvals (28 Nov 2026, owner rule:
+  // "otomatis allow aja, kecuali yang high impact"). OFF by default; only
+  // on/true/1 enable it. High-risk approvals still ask; hard blocks
+  // (rm root, sudo, .env, git/gh/ssh, curl|sh, ...) still block.
+  BIKININ_AUTO_APPROVE: z.string().optional(),
 });
+
+/** BIKININ_AUTO_APPROVE is OFF by default; only on/true/1 turn it on. */
+export function isAutoApproveEnabled(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  return ["on", "true", "1"].includes(value.trim().toLowerCase());
+}
 
 /** BIKININ_MEMORY_MODEL_EXTRACT is OFF by default; only on/true/1 turn it on. */
 export function isMemoryModelExtractEnabled(

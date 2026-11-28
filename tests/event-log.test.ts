@@ -19,7 +19,7 @@ function buildEvents(): AgentEvent[] {
     model: "test-model",
     effort: "sedang",
     user_message: "buat halaman kopi",
-    limits: { max_steps: 10, max_cost_usd: 1 },
+    limits: { max_cost_usd: 1 },
   });
   emit("text_delta", { text: "Siap, " });
   emit("text_delta", { text: "dibuatkan." });

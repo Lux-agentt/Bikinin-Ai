@@ -114,12 +114,12 @@ function toast(msg) {
 }
 
 function setMeters(steps, cost) {
-  const max = state.cfg ? state.cfg.max_steps : 0;
-  const p = max > 0 ? Math.min(steps / max, 1) : 0;
-  $("#ringArc").style.strokeDashoffset = (CIRC * (1 - p)).toFixed(2);
-  $("#ringBtn").classList.toggle("full", max > 0 && steps >= max);
-  $("#ringLabel").textContent = `${steps}/${max}`;
-  $("#stSteps").textContent = `${steps} / ${max}`;
+  // 28 Nov 2026: no step limit anymore — the ring shows the step count
+  // only (no "/max", no fill toward a limit, no "full" state).
+  $("#ringArc").style.strokeDashoffset = CIRC.toFixed(2);
+  $("#ringBtn").classList.remove("full");
+  $("#ringLabel").textContent = `${steps}`;
+  $("#stSteps").textContent = `${steps}`;
   $("#stCost").textContent = fmtUsd(cost);
   $("#stIdr").textContent = fmtIdr(cost);
 }

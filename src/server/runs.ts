@@ -11,7 +11,11 @@ import {
   type ApprovalRequest,
   type EmitFn,
 } from "../agent/loop.js";
-import { isMemoryModelExtractEnabled, type Config } from "../config.js";
+import {
+  isAutoApproveEnabled,
+  isMemoryModelExtractEnabled,
+  type Config,
+} from "../config.js";
 import type { z } from "zod";
 import {
   createEmitter,
@@ -275,7 +279,6 @@ export class RunManager {
       models: [...new Set(this.cfg.providers.map((p) => p.model))],
       providers: this.cfg.providers.map((p) => p.name),
       usd_idr: this.cfg.BIKININ_USD_IDR,
-      max_steps: this.cfg.BIKININ_MAX_STEPS,
       max_cost_usd: this.cfg.BIKININ_MAX_COST_USD,
     };
   }
@@ -752,9 +755,14 @@ export class RunManager {
         sessionId: rec.sessionId,
         workspace: this.opts.workspace,
         limits: {
-          maxSteps: this.cfg.BIKININ_MAX_STEPS,
           maxCostUsd: this.cfg.BIKININ_MAX_COST_USD,
         },
+        // Auto-approve low/medium-risk approvals (owner rule, 28 Nov 2026):
+        // BIKININ_AUTO_APPROVE=1 in .env. High-risk still asks; hard
+        // blocks still block.
+        autoApproveLowMedium: isAutoApproveEnabled(
+          this.cfg.BIKININ_AUTO_APPROVE,
+        ),
         prices: { inPerM: provider.inPerM, outPerM: provider.outPerM },
         emit,
         approve,

@@ -67,7 +67,7 @@ async function run(
     message: "tes",
     sessionId: "s_test",
     workspace,
-    limits: { maxSteps: 10, maxCostUsd: 1 },
+    limits: { maxCostUsd: 1 },
     prices: { inPerM: 1, outPerM: 2 },
     emit,
     approve: async () => false,
@@ -180,20 +180,42 @@ describe("agent loop event contract", () => {
     expectWellFormed(events);
   });
 
-  it("stops with budget_exceeded before running tools that would pass the step limit", async () => {
+  it("runs tools without any step limit", async () => {
+    // 28 Nov 2026: the step limit was removed at the owner's request —
+    // runs stop only on cost now, so many tool calls in one run complete.
     const { events, result } = await run(
       [
+        withCalls(plan("t0")),
         withCalls(
           call("t1", "list_dir", { path: "." }),
           call("t2", "list_dir", { path: "." }),
         ),
+        finalText("ok"),
       ],
-      { limits: { maxSteps: 1, maxCostUsd: 1 } },
+      { limits: { maxCostUsd: 1 } },
     );
-    expect(result.status).toBe("budget_exceeded");
-    const finished = ofType(events, "run_finished")[0];
-    expect(finished.resumable).toBe(true);
-    expect(ofType(events, "tool_call_started")).toHaveLength(0);
+    expect(result.status).toBe("completed");
+    expect(ofType(events, "tool_call_started")).toHaveLength(3);
+    expectWellFormed(events);
+  });
+
+  it("auto-approves a medium-risk command without asking when autoApproveLowMedium is on", async () => {
+    // 28 Nov 2026, owner rule: low/medium-risk approvals auto-allow;
+    // only high-risk still asks. `node --version` is confirm-gated
+    // (medium) but harmless and fast.
+    const { events, result } = await run(
+      [
+        withCalls(plan("t0")),
+        withCalls(call("t1", "run_command", { command: "node --version" })),
+        finalText("ok"),
+      ],
+      { autoApproveLowMedium: true },
+    );
+    expect(result.status).toBe("completed");
+    expect(ofType(events, "approval_requested")).toHaveLength(0);
+    expect(ofType(events, "approval_resolved")).toHaveLength(0);
+    // The command actually ran instead of being held at the approval gate.
+    expect(ofType(events, "tool_call_finished")).toHaveLength(2);
     expectWellFormed(events);
   });
 
@@ -250,7 +272,7 @@ describe("agent loop event contract", () => {
       message: "baca a.txt",
       sessionId: "s_test",
       workspace,
-      limits: { maxSteps: 10, maxCostUsd: 1 },
+      limits: { maxCostUsd: 1 },
       prices: { inPerM: 1, outPerM: 2 },
       emit,
       approve: async () => false,
@@ -293,7 +315,7 @@ describe("agent loop event contract", () => {
       message: "baca a.txt",
       sessionId: "s_test",
       workspace,
-      limits: { maxSteps: 10, maxCostUsd: 1 },
+      limits: { maxCostUsd: 1 },
       prices: { inPerM: 1, outPerM: 2 },
       emit,
       approve: async () => false,
@@ -368,7 +390,7 @@ describe("agent loop event contract", () => {
       message: "baca a.txt",
       sessionId: "s_test",
       workspace,
-      limits: { maxSteps: 10, maxCostUsd: 1 },
+      limits: { maxCostUsd: 1 },
       prices: { inPerM: 1, outPerM: 2 },
       emit,
       approve: async () => false,

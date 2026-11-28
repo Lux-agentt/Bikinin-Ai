@@ -54,7 +54,6 @@ export interface RunEvalOptions {
   llmFor: (task: EvalTask) => LlmClient;
   modelLabel: string;
   mode: "dummy" | "live";
-  maxSteps?: number;
   maxCostUsd?: number;
   prices?: { inPerM: number; outPerM: number };
   /** Where to write the JSON log. Defaults to <workspaceRoot>/.bikinin/evals. */
@@ -78,7 +77,6 @@ export async function runEvalTask(
     systemPrompt: string;
     llm: LlmClient;
     modelLabel: string;
-    maxSteps: number;
     maxCostUsd: number;
     prices: { inPerM: number; outPerM: number };
     runDir: string;
@@ -104,7 +102,7 @@ export async function runEvalTask(
       message: task.prompt,
       sessionId: `eval_${slug(task.id)}`,
       workspace: dir,
-      limits: { maxSteps: opts.maxSteps, maxCostUsd: opts.maxCostUsd },
+      limits: { maxCostUsd: opts.maxCostUsd },
       prices: opts.prices,
       emit,
       approve: async () => false, // eval never runs unapproved commands
@@ -211,7 +209,6 @@ export async function runEvalSuite(opts: RunEvalOptions): Promise<{
             ? createDummyLlm(planFirstScript(task))
             : opts.llmFor(task),
         modelLabel: opts.modelLabel,
-        maxSteps: opts.maxSteps ?? 30,
         maxCostUsd: opts.maxCostUsd ?? 0.5,
         prices: opts.prices ?? { inPerM: 0, outPerM: 0 },
         runDir,

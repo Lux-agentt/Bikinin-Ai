@@ -77,7 +77,7 @@ async function run(
     systemPrompt: "sys",
     message: "smoke fase 6",
     sessionId: "s_smoke",
-    limits: { maxSteps: 15, maxCostUsd: 1 },
+    limits: { maxCostUsd: 1 },
     prices: { inPerM: 1, outPerM: 2 },
     emit,
     approve: async () => false,

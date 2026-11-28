@@ -418,7 +418,6 @@ describe("hot reload skill (Fase 8)", () => {
       },
     ],
     BIKININ_USD_IDR: 17000,
-    BIKININ_MAX_STEPS: 10,
     BIKININ_MAX_COST_USD: 1,
     BIKININ_WORKSPACE: "./workspace",
     BIKININ_MAX_VIDEO_SECONDS: 30,

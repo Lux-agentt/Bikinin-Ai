@@ -186,7 +186,7 @@ async function main(): Promise<void> {
       message: "Buat video 10 detik intro dengan teks animasi",
       sessionId: "s_smoke_remotion",
       workspace,
-      limits: { maxSteps: 30, maxCostUsd: 1 },
+      limits: { maxCostUsd: 1 },
       prices: { inPerM: 1, outPerM: 2 },
       emit,
       approve: async () => true, // smoke: izinkan npm install (di luar allowlist)

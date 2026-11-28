@@ -52,7 +52,6 @@ async function main(): Promise<number> {
       sessionId: `cmp_${slug(name)}`,
       workspace,
       limits: {
-        maxSteps: cfg.BIKININ_MAX_STEPS,
         maxCostUsd: cfg.BIKININ_MAX_COST_USD,
       },
       prices: { inPerM: provider.inPerM, outPerM: provider.outPerM },

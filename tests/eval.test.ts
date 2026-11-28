@@ -47,7 +47,7 @@ describe("behaviour proxies", () => {
         model: "m",
         effort: "sedang",
         user_message: "x",
-        limits: { max_steps: 10, max_cost_usd: 1 },
+        limits: { max_cost_usd: 1 },
       });
       emit("text_delta", { text: "Mau dibuatkan apa?" });
       emit("tool_call_started", {
@@ -68,7 +68,7 @@ describe("behaviour proxies", () => {
         model: "m",
         effort: "sedang",
         user_message: "x",
-        limits: { max_steps: 10, max_cost_usd: 1 },
+        limits: { max_cost_usd: 1 },
       });
       emit("tool_call_started", {
         call_id: "c1",
@@ -102,7 +102,7 @@ describe("behaviour proxies", () => {
         model: "m",
         effort: "sedang",
         user_message: "x",
-        limits: { max_steps: 10, max_cost_usd: 1 },
+        limits: { max_cost_usd: 1 },
       });
       emit("tool_call_started", {
         call_id: "c1",
@@ -171,7 +171,6 @@ describe("runner with dummy model", () => {
       systemPrompt: "sys",
       llm: createDummyLlm(planFirstScript(task)),
       modelLabel: "dummy",
-      maxSteps: 10,
       maxCostUsd: 1,
       prices: { inPerM: 0, outPerM: 0 },
       runDir: join(workspaceRoot, "runs"),

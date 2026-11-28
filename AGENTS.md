@@ -68,7 +68,7 @@ bikinin-ai/
     safety/
       paths.ts             # blokir akses di luar workspace
       commands.ts          # blocklist/konfirmasi perintah berbahaya
-      budget.ts            # batas langkah, token, biaya
+      budget.ts            # batas biaya (langkah hanya dihitung; subagent tetap dibatasi 8 langkah)
     config.ts              # baca env
   scripts/
     check-provider.ts      # uji penyedia (Bagian 6)
@@ -99,8 +99,8 @@ BIKININ_CHEAP_MODEL=      # model murah untuk tugas ringan
 PRICE_INPUT_PER_M=        # harga USD per 1 juta token input
 PRICE_OUTPUT_PER_M=       # harga USD per 1 juta token output
 BIKININ_USD_IDR=17000     # hanya untuk tampilan biaya dalam rupiah
-BIKININ_MAX_STEPS=30
 BIKININ_MAX_COST_USD=0.50
+BIKININ_AUTO_APPROVE=    # 1 = persetujuan low/medium-risk otomatis diizinkan (aturan pemilik 28 Nov 2026); high-risk tetap bertanya; blokir keras tetap berlaku
 BIKININ_WORKSPACE=./workspace
 BIKININ_MAX_VIDEO_SECONDS=30   # batas durasi video Remotion (mesin 2-core lambat)
 ```
@@ -118,7 +118,7 @@ Buat `scripts/check-provider.ts` yang menguji, lalu mencetak hasilnya:
 
 Jika ada yang gagal, **laporkan ke pemilik sebelum lanjut**. Biaya dihitung dari `usage` x harga di `.env`, bukan dari field biaya penyedia.
 
-Catatan keamanan: penyedia adalah perantara pihak ketiga. Jangan kirim rahasia lewat prompt, dan **jangan pernah memakai mode tanpa konfirmasi (`--yolo`)**, karena respons perantara bisa memuat perintah berbahaya.
+Catatan keamanan: penyedia adalah perantara pihak ketiga. Jangan kirim rahasia lewat prompt, dan **jangan pernah memakai mode tanpa konfirmasi (`--yolo`)**, karena respons perantara bisa memuat perintah berbahaya. Pengecualian yang diputuskan pemilik sendiri (28 Nov 2026, hanya untuk server web pribadinya): `BIKININ_AUTO_APPROVE=1` — persetujuan **low/medium-risk** otomatis diizinkan (semua confirm yang ada hari ini berkategori medium, jadi praktis tidak ada lagi yang bertanya), **high-risk tetap bertanya**, dan blokir keras (`rm` root/workspace, `sudo`, baca `.env`/kunci, `git`/`gh`/`ssh`, `curl|sh`, dsb.) tetap berlaku. Bukan `--yolo`: `--yolo` juga mengizinkan high-risk.
 
 ## 7. Fase pengerjaan
 
@@ -132,7 +132,7 @@ Catatan keamanan: penyedia adalah perantara pihak ketiga. Jangan kirim rahasia l
 - [ ] Tool paralel dijalankan bersamaan bila tidak saling bergantung.
 - [ ] Output tool panjang dipotong (maks 8.000 karakter) dengan penanda.
 - [ ] Hitung token dan biaya dari `usage`; tampilkan di akhir.
-- [ ] Batas langkah dan biaya dari env; berhenti dan minta persetujuan jika terlewati.
+- [ ] Batas biaya dari env; berhenti bila terlewati. (Batas langkah dihapus 28 Nov 2026 atas permintaan pemilik — run hanya berhenti karena biaya, atau tombol Stop. Subagent tetap punya batas sendiri: 8 langkah + $0,05.)
 - [ ] Konfirmasi interaktif sebelum `run_command` di luar allowlist.
 - [ ] File hanya boleh dibaca/ditulis di dalam `BIKININ_WORKSPACE`.
 - [ ] `scripts/compare-models.ts`: jalankan tugas yang sama ke 2-3 model dari argumen, cetak tabel (langkah, token, biaya, waktu, apakah file terbentuk).
@@ -175,7 +175,7 @@ Baca Bagian 8. Acuan tampilan: `design/bikinin-ai-ui.html` (prototipe simulasi; 
 - [x] Sambungkan UI ke SSE; ganti `STEPS` dan `PAGE` buatan di prototipe dengan kejadian sungguhan.
 - [x] Tambah dialog persetujuan perintah, pohon file, penampil kode, unduh ZIP.
 - [x] Preview memakai `<iframe sandbox="allow-scripts">` (tanpa `allow-same-origin`).
-- [x] Batas biaya dan langkah benar-benar menghentikan run (di prototipe hanya toast).
+- [x] Batas biaya benar-benar menghentikan run (di prototipe hanya toast).
 - [x] Kunci API **tidak pernah** ada di browser; semua panggilan LLM lewat server.
 
 ### Fase 5: Cari, checkpoint, subagent, dan hemat token
@@ -308,7 +308,7 @@ Untuk CLI, "jawab persetujuan" = prompt `y/N` di terminal, bukan HTTP.
 | `verification`        | Self-check selesai (Fase 6, sebelum `run_finished`) | `outcome` (`pass`/`fail`), `checks[{name, ok, detail}]`, `fixes` (putaran perbaikan yang sudah dipakai, maks 2)          |
 | `file_changed`        | File dibuat/diubah/dihapus                          | `path` (relatif), `op`, `bytes`, `diff`                                                                                  |
 | `usage`               | Setelah tiap panggilan LLM                          | token, `cost_usd`, `totals`                                                                                              |
-| `budget_warning`      | 80% dan 100% batas                                  | `kind` (`steps`/`cost`), `used`, `limit`                                                                                 |
+| `budget_warning`      | 80% dan 100% batas biaya | `kind` (`cost`), `used`, `limit` |
 | `preview_ready`       | Ada pratinjau                                       | `kind` (`web`/`video`), `url`                                                                                            |
 | `artifact_ready`      | Ada berkas hasil                                    | `kind` (`zip`/`video`/`file`), `path`, `mime`                                                                            |
 | `error`               | Ada masalah                                         | `code`, `message`, `retryable`                                                                                           |
@@ -331,7 +331,7 @@ Untuk CLI, "jawab persetujuan" = prompt `y/N` di terminal, bukan HTTP.
 | ----------------------------------------------- | --------------------------------------------------------------------------- |
 | Judul panel "Agent bekerja" / "Agent selesai"   | `run_started` → `run_finished`                                              |
 | Baris langkah (aktif → centang)                 | `tool_call_started` → `tool_call_finished` (`label`, `summary`)             |
-| Ring batas langkah (`#ring`) dan jumlah langkah | `usage.totals.steps` / `limits.max_steps`; penuh saat `budget_warning` 100% |
+| Jumlah langkah (`#ring`) | `usage.totals.steps` (tanpa batas; ring hanya menampilkan jumlah langkah) |
 | Biaya di panel (`.pcost`)                       | `usage.totals.cost_usd`                                                     |
 | Chip model (`.pmchip`)                          | `run_started.model` + `effort`                                              |
 | Timer                                           | selisih `run_started.ts` dan `ts` terbaru                                   |
@@ -446,7 +446,7 @@ export const RunStatus = z.enum([
   "completed",
   "stopped", // user pressed stop
   "error",
-  "budget_exceeded", // cost or step limit hit; resumable
+  "budget_exceeded", // cost limit hit; resumable
 ]);
 
 /* ---------- events ---------- */
@@ -457,7 +457,7 @@ export const RunStarted = Base.extend({
   model: z.string(),
   effort: z.enum(["sedang", "tinggi"]),
   user_message: z.string(),
-  limits: z.object({ max_steps: z.number().int(), max_cost_usd: z.number() }),
+  limits: z.object({ max_cost_usd: z.number() }),
 });
 
 export const TextDelta = Base.extend({
@@ -532,7 +532,7 @@ export const Usage = Base.extend({
 
 export const BudgetWarning = Base.extend({
   type: z.literal("budget_warning"),
-  kind: z.enum(["steps", "cost"]),
+  kind: z.enum(["cost"]),
   used: z.number(),
   limit: z.number(),
   percent: z.number(), // emitted at 80 and 100

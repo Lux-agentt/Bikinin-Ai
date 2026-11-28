@@ -25,7 +25,7 @@ function runEvents(
     model: "test-model",
     effort: "sedang",
     user_message: userMessage,
-    limits: { max_steps: 10, max_cost_usd: 1 },
+    limits: { max_cost_usd: 1 },
   });
   if (tool) {
     emit("tool_call_started", {
@@ -98,7 +98,7 @@ describe("rebuildHistory", () => {
       model: "test-model",
       effort: "sedang",
       user_message: "coba",
-      limits: { max_steps: 10, max_cost_usd: 1 },
+      limits: { max_cost_usd: 1 },
     });
     emit("tool_call_started", {
       call_id: "c1",
@@ -137,7 +137,7 @@ describe("rebuildHistory", () => {
       model: "test-model",
       effort: "sedang",
       user_message: "hai",
-      limits: { max_steps: 10, max_cost_usd: 1 },
+      limits: { max_cost_usd: 1 },
     });
     emit("approval_requested", {
       approval_id: "a1",

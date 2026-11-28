@@ -190,7 +190,6 @@ async function main(): Promise<number> {
       sessionId,
       workspace,
       limits: {
-        maxSteps: cfg.BIKININ_MAX_STEPS,
         maxCostUsd: cfg.BIKININ_MAX_COST_USD,
       },
       prices: { inPerM: primary.inPerM, outPerM: primary.outPerM },

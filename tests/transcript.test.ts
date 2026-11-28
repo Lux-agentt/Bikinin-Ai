@@ -41,7 +41,7 @@ const started = (seq: number) =>
     model: "test-model",
     effort: "sedang",
     user_message: "buat halaman",
-    limits: { max_steps: 10, max_cost_usd: 1 },
+    limits: { max_cost_usd: 1 },
   });
 
 const finished = (seq: number, status = "completed") =>

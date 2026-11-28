@@ -110,7 +110,7 @@ async function oneRun(opts: {
     message: "Buatkan landing page kedai kopi",
     sessionId: "s_smoke",
     workspace,
-    limits: { maxSteps: 10, maxCostUsd: 1 },
+    limits: { maxCostUsd: 1 },
     prices: { inPerM: 1, outPerM: 2 },
     emit,
     approve: async () => false,

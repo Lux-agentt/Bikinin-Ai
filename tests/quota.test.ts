@@ -515,7 +515,7 @@ describe("ledger quota snapshot + router outcome", () => {
       model: NORTH,
       effort: "sedang",
       user_message: "buatkan website",
-      limits: { max_steps: 10, max_cost_usd: 1 },
+      limits: { max_cost_usd: 1 },
       route: {
         category: "coding",
         reason: 'tugas coding (kata kunci: "website")',

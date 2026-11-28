@@ -34,7 +34,6 @@ function loadEvalConfig(modelName?: string): Config {
     );
     return {
       BIKININ_USD_IDR: 17000,
-      BIKININ_MAX_STEPS: 30,
       BIKININ_MAX_COST_USD: 0.5,
       BIKININ_WORKSPACE: join(tmpdir(), "bikinin-eval-workspace"),
       BIKININ_MAX_VIDEO_SECONDS: 30,
@@ -118,7 +117,6 @@ async function main(): Promise<number> {
     llmFor,
     modelLabel,
     mode,
-    maxSteps: cfg.BIKININ_MAX_STEPS,
     maxCostUsd: cfg.BIKININ_MAX_COST_USD,
     prices,
     outDir,

@@ -52,7 +52,16 @@ export interface AgentDeps {
   message: string;
   sessionId: string;
   workspace: string; // absolute realpath
-  limits: { maxSteps: number; maxCostUsd: number };
+  limits: { maxCostUsd: number; maxSteps?: number };
+  /**
+   * Auto-approve low/medium-risk approvals without asking (owner rule,
+   * BIKININ_AUTO_APPROVE=1). High-risk approvals still ask; hard blocks
+   * still block. Off by default.
+   *
+   * maxSteps is optional and only used by subagents (their own 8-step
+   * cap); the main run has no step limit since 28 Nov 2026.
+   */
+  autoApproveLowMedium?: boolean;
   prices: Prices;
   emit: EmitFn;
   approve: (req: ApprovalRequest) => Promise<boolean>;
@@ -155,7 +164,7 @@ function errorInfo(err: unknown): { code: ErrorCode; message: string } {
 
 export async function runAgent(d: AgentDeps): Promise<AgentResult> {
   const startedAt = Date.now();
-  const budget = new Budget(d.limits.maxSteps, d.limits.maxCostUsd);
+  const budget = new Budget(d.limits.maxCostUsd, d.limits.maxSteps);
   const tokens = { input: 0, output: 0, cached: 0 };
   const created = new Set<string>();
   const changed = new Set<string>();
@@ -337,24 +346,32 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
         : [];
       planApproval = "pending";
       const approvalId = randomUUID().slice(0, 8);
-      emit("approval_requested", {
-        approval_id: approvalId,
-        call_id: callId,
-        tool: tool.name,
-        reason: `Setujui rencana ini sebelum file diubah? ${summary}${files.length > 0 ? ` File: ${files.join(", ")}` : ""}`,
-        risk: "medium",
-      });
-      const approved = await d.approve({
-        approvalId,
-        command: "",
-        reason: summary,
-        risk: "medium",
-      });
-      emit("approval_resolved", {
-        approval_id: approvalId,
-        decision: approved ? "allow" : "deny",
-        by: "user",
-      });
+      // Auto-approve (28 Nov 2026, owner rule): low/medium-risk approvals
+      // run without asking; only high-risk still pops the sheet. Plan
+      // approval is medium risk, so it auto-approves when the flag is on.
+      let approved: boolean;
+      if (d.autoApproveLowMedium === true) {
+        approved = true;
+      } else {
+        emit("approval_requested", {
+          approval_id: approvalId,
+          call_id: callId,
+          tool: tool.name,
+          reason: `Setujui rencana ini sebelum file diubah? ${summary}${files.length > 0 ? ` File: ${files.join(", ")}` : ""}`,
+          risk: "medium",
+        });
+        approved = await d.approve({
+          approvalId,
+          command: "",
+          reason: summary,
+          risk: "medium",
+        });
+        emit("approval_resolved", {
+          approval_id: approvalId,
+          decision: approved ? "allow" : "deny",
+          by: "user",
+        });
+      }
       planApproval = approved ? "approved" : "denied";
       if (!approved) planDenied = true;
       emitFinished(
@@ -409,25 +426,34 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
 
     if (verdict.decision === "confirm") {
       const approvalId = randomUUID().slice(0, 8);
-      emit("approval_requested", {
-        approval_id: approvalId,
-        call_id: callId,
-        tool: tool.name,
-        command: verdict.command,
-        reason: verdict.reason,
-        risk: verdict.risk,
-      });
-      const approved = await d.approve({
-        approvalId,
-        command: verdict.command,
-        reason: verdict.reason,
-        risk: verdict.risk,
-      });
-      emit("approval_resolved", {
-        approval_id: approvalId,
-        decision: approved ? "allow" : "deny",
-        by: "user",
-      });
+      // Auto-approve (28 Nov 2026, owner rule): low/medium-risk approvals
+      // run without asking; only high-risk still pops the sheet.
+      const autoApproved =
+        d.autoApproveLowMedium === true && verdict.risk !== "high";
+      let approved: boolean;
+      if (autoApproved) {
+        approved = true;
+      } else {
+        emit("approval_requested", {
+          approval_id: approvalId,
+          call_id: callId,
+          tool: tool.name,
+          command: verdict.command,
+          reason: verdict.reason,
+          risk: verdict.risk,
+        });
+        approved = await d.approve({
+          approvalId,
+          command: verdict.command,
+          reason: verdict.reason,
+          risk: verdict.risk,
+        });
+        emit("approval_resolved", {
+          approval_id: approvalId,
+          decision: approved ? "allow" : "deny",
+          by: "user",
+        });
+      }
       if (!approved) {
         emitFinished(callId, false, "ditolak pengguna", "", startedMs);
         return {
@@ -783,7 +809,7 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
     model: d.model,
     effort: d.effort ?? "sedang",
     user_message: d.message,
-    limits: { max_steps: d.limits.maxSteps, max_cost_usd: d.limits.maxCostUsd },
+    limits: { max_cost_usd: d.limits.maxCostUsd },
   });
 
   // Fase 5: checkpoint event comes right after run_started, never before it.
@@ -813,6 +839,8 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
   try {
     for (;;) {
       if (d.signal?.aborted) return finish("stopped", "Dihentikan pengguna.");
+      // Step cap only applies when a maxSteps was passed (subagents);
+      // the main run has no step limit since 28 Nov 2026.
       if (budget.stepsExceeded()) {
         flushAlerts();
         return finish(
@@ -887,7 +915,7 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
                 `${res.text.trim() || "Selesai."}\n\nCatatan: verifikasi sendiri masih menemukan masalah setelah ${SELF_CHECK_MAX_FIX_ROUNDS} putaran perbaikan — ${failed}`,
               );
             }
-            if (budget.costExceeded() || budget.stepsExceeded()) {
+            if (budget.costExceeded()) {
               flushAlerts();
               return finish(
                 "budget_exceeded",
@@ -910,7 +938,10 @@ export async function runAgent(d: AgentDeps): Promise<AgentResult> {
           `Batas biaya $${budget.maxCostUsd} tercapai.`,
         );
       }
-      if (budget.steps + res.toolCalls.length > budget.maxSteps) {
+      if (
+        budget.maxSteps !== undefined &&
+        budget.steps + res.toolCalls.length > budget.maxSteps
+      ) {
         return finish(
           "budget_exceeded",
           `Batas ${budget.maxSteps} langkah tercapai.`,

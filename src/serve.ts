@@ -34,7 +34,6 @@ async function main(): Promise<void> {
     cfg = {
       providers: [],
       BIKININ_USD_IDR: 17000,
-      BIKININ_MAX_STEPS: 30,
       BIKININ_MAX_COST_USD: 0.5,
       BIKININ_WORKSPACE:
         process.env.BIKININ_WORKSPACE ?? join(homedir(), "bikinin-workspace"),
