@@ -1,6 +1,6 @@
 ---
 name: web3-triage-report
-category: web3-bounty
+category: bounty
 description: Bug triage validation system, Immunefi report format, and 20 real paid bounty examples dissected. Use this when validating a finding before submitting, writing an Immunefi report, checking if a bug is actually valid, or studying real examples of paid vulnerabilities.
 ---
 # TRIAGE, REPORT WRITING & REAL EXAMPLES

@@ -2,9 +2,11 @@
 // Only name + description + category are exposed to the model; the full file
 // is read by the agent on demand via the read_skill tool. Returns [] when the
 // folder does not exist yet. A broken skill is skipped, never fatal.
-// Kategori (2026-11-28, aturan user: skill dikategorikan biar gampang
-// dicari, TANPA ada yang dihapus): 16 topik, ditulis di frontmatter tiap
-// skill sebagai `category: <slug>`; daftar prompt dikelompokkan per kategori.
+// Kategori (aturan user 28 Nov 2026): 5 kelompok — video, coding, website,
+// writing, bounty — ditulis di frontmatter tiap skill sebagai
+// `category: <slug>`; daftar prompt dikelompokkan per kelompok. 152 skill
+// tak terpakai dihapus atas persetujuan user (28 Nov 2026, v2: coding
+// disimpan, bounty kelompok sendiri); yang tersisa 201 skill.
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, resolve, sep } from "node:path";
@@ -21,25 +23,14 @@ export interface SkillInfo {
   category: string;
 }
 
-/** Urutan kategori di daftar prompt: yang paling sering dipakai Rizqi dulu
- *  (website, video, bounty, konten), sisanya menyusul. */
+/** Urutan kelompok di daftar prompt: sesuai urutan yang disebut user
+ *  28 Nov 2026 (video, coding, website, writing, bounty). */
 export const CATEGORY_ORDER = [
-  "website",
   "video",
-  "web3-bounty",
-  "konten-sosial",
-  "backend-api",
-  "framework",
-  "testing-qa",
-  "agent-harness",
-  "orch",
-  "devops-infra",
-  "data-ml",
-  "bisnis-ops",
-  "mobile-desktop",
-  "git-ops",
-  "produk-perencanaan",
-  "lainnya",
+  "coding",
+  "website",
+  "writing",
+  "bounty",
 ] as const;
 
 export const DEFAULT_CATEGORY = "lainnya";

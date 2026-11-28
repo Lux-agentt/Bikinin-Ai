@@ -1,6 +1,6 @@
 ---
 name: web3-start-here
-category: web3-bounty
+category: bounty
 description: Master index for the web3 smart contract security knowledge base. Use this to navigate the skill chain. Read files in order — each ends with NEXT.
 ---
 # WEB3 SKILLS — MASTER INDEX

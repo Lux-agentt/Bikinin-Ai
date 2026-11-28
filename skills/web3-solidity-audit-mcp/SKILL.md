@@ -1,6 +1,6 @@
 ---
 name: web3-solidity-audit-mcp
-category: web3-bounty
+category: bounty
 description: MCP server integrating Slither + Aderyn + SWC patterns into Claude Code for smart contract auditing. Use when analyzing Solidity files, running DeFi-specific detectors, or generating invariants. 10 MCP tools, 86 SWC detectors, DeFi preset pack, CI/CD workflow.
 ---
 # SKILL 36 — SOLIDITY AUDIT MCP: CLAUDE-NATIVE SMART CONTRACT SCANNER

@@ -160,16 +160,16 @@ describe("formatSkillList", () => {
         },
       ]),
     ).toBe(
-      "### website\n- website: Gunakan saat membuat website.\n" +
-        "### video\n- remotion: Buat video.\n" +
+      "### video\n- remotion: Buat video.\n" +
+        "### website\n- website: Gunakan saat membuat website.\n" +
         "### lainnya\n- zeta: Skill Z.",
     );
   });
 
   it("an invalid category value falls back to lainnya", () => {
     // Pernah kejadian: 3 skill motion membawa `category: frontend` dari
-    // sumber aslinya — bukan bagian dari 16 kategori, jadi dikelompokkan
-    // ke lainnya daripada membuat grup ke-17.
+    // sumber aslinya — bukan bagian dari 5 kelompok, jadi dikelompokkan
+    // ke lainnya daripada membuat grup ke-6.
     expect(
       formatSkillList([
         {
@@ -273,8 +273,8 @@ describe("system prompt wiring", () => {
     ]) {
       expect(names).toContain(expected);
     }
-    expect(skills).toHaveLength(353);
-    for (const ecc of ["accessibility", "agent-eval", "api-design"]) {
+    expect(skills).toHaveLength(201);
+    for (const ecc of ["accessibility", "api-design", "docker-patterns"]) {
       expect(names).toContain(ecc);
     }
     expect(names).toContain("free-for-dev");
@@ -302,29 +302,18 @@ describe("system prompt wiring", () => {
   });
 });
 
-describe("kategori skill (2026-11-28: dikategorikan, TANPA hapus)", () => {
+describe("kategori skill (2026-11-28: 5 kelompok; 152 skill dihapus atas persetujuan user)", () => {
   const EXPECTED_COUNTS: Record<string, number> = {
-    website: 27,
     video: 16,
-    "web3-bounty": 23,
-    "konten-sosial": 18,
-    "backend-api": 16,
-    framework: 52,
-    "testing-qa": 5,
-    "agent-harness": 98,
-    orch: 6,
-    "devops-infra": 20,
-    "data-ml": 22,
-    "bisnis-ops": 26,
-    "mobile-desktop": 6,
-    "git-ops": 6,
-    "produk-perencanaan": 4,
-    lainnya: 8,
+    coding: 126,
+    website: 18,
+    writing: 18,
+    bounty: 23,
   };
 
-  it("setiap skill punya kategori dari 16 kategori yang dikenal, tidak ada yang terhapus", async () => {
+  it("setiap skill punya kategori dari 5 kelompok yang dikenal, 201 skill tersisa", async () => {
     const skills = await listSkills(REPO_SKILLS_DIR);
-    expect(skills).toHaveLength(353);
+    expect(skills).toHaveLength(201);
     const counts: Record<string, number> = {};
     for (const s of skills) {
       expect(CATEGORY_ORDER).toContain(s.category);
@@ -333,20 +322,27 @@ describe("kategori skill (2026-11-28: dikategorikan, TANPA hapus)", () => {
     expect(counts).toEqual(EXPECTED_COUNTS);
   });
 
-  it("prompt mengelompokkan skill per kategori (website dulu, video kedua)", async () => {
+  it("prompt mengelompokkan skill per kelompok (video dulu, bounty terakhir)", async () => {
     const skills = await listSkills(REPO_SKILLS_DIR);
     const list = formatSkillList(skills);
-    const iWeb = list.indexOf("### website\n");
-    const iWebSkill = list.indexOf("- website:");
     const iVid = list.indexOf("### video\n");
-    const iVidSkill = list.indexOf("- remotion:");
-    expect(iWeb).toBeGreaterThanOrEqual(0);
-    expect(iWebSkill).toBeGreaterThan(iWeb);
-    expect(iVid).toBeGreaterThan(iWebSkill);
-    expect(iVidSkill).toBeGreaterThan(iVid);
-    expect(list).toContain("### agent-harness\n- agent-architecture-audit:");
-    // Judul kategori cuma 16, tidak ada grup liar dari nilai lama.
-    expect(list.match(/^### .+$/gm)).toHaveLength(16);
+    const iCod = list.indexOf("### coding\n");
+    const iWeb = list.indexOf("### website\n");
+    const iWri = list.indexOf("### writing\n");
+    const iBou = list.indexOf("### bounty\n");
+    expect(iVid).toBeGreaterThanOrEqual(0);
+    expect(iCod).toBeGreaterThan(iVid);
+    expect(iWeb).toBeGreaterThan(iCod);
+    expect(iWri).toBeGreaterThan(iWeb);
+    expect(iBou).toBeGreaterThan(iWri);
+    // Skill pertama tiap kelompok (urut alfabet di dalam kelompok).
+    expect(list).toContain("### video\n- blender-motion-state-inspection:");
+    expect(list).toContain("### coding\n- android-clean-architecture:");
+    expect(list).toContain("### website\n- accessibility:");
+    expect(list).toContain("### writing\n- article-writing:");
+    expect(list).toContain("### bounty\n- bug-bounty-reporting:");
+    // Judul kelompok cuma 5, tidak ada grup liar dari nilai lama.
+    expect(list.match(/^### .+$/gm)).toHaveLength(5);
   });
 });
 

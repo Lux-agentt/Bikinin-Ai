@@ -1,6 +1,6 @@
 ---
 name: content-repurpose
-category: konten-sosial
+category: writing
 description: Gunakan saat mengadaptasi satu materi sumber menjadi beberapa format konten tanpa mengubah fakta atau maksud aslinya.
 ---
 # Content Repurposing

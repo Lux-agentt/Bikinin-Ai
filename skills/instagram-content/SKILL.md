@@ -1,6 +1,6 @@
 ---
 name: instagram-content
-category: konten-sosial
+category: writing
 description: Gunakan saat membuat konten Instagram seperti ide Reels, carousel, caption, CTA, atau kalender posting.
 ---
 # Instagram Content

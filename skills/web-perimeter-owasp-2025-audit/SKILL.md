@@ -1,6 +1,6 @@
 ---
 name: web-perimeter-owasp-2025-audit
-category: web3-bounty
+category: bounty
 description: Passive, non-destructive web perimeter security auditing mapped to OWASP Top 10:2025 surface leads, CDN Unkeyed Header Web Cache Poisoning (X-Forwarded-Host), supply chain manifest exposure, git object dumping prevention (/.git/HEAD), cryptographic headers, and AI crawler boundary governance (llms.txt, robots.txt). Use when auditing production domains, configuring Cloudflare/Vercel/Nginx edge security, or preparing pre-launch perimeter checks.
 metadata:
   origin: ECC

@@ -1,6 +1,6 @@
 ---
 name: bug-bounty-writeups
-category: web3-bounty
+category: bounty
 description: Learn bug bounty methodology from curated writeups, build recon and test checklists by vulnerability class, and report authorized findings.
 ---
 # Bug Bounty Writeups
